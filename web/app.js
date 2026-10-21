@@ -246,8 +246,8 @@ function catalogCard(d) {
     .sort((a, b) => (a.read === b.read ? b.spend - a.spend : a.read === 'hit' ? -1 : 1)).slice(0, 20);
   const read = { hit: ['green', 'Directional hit'], miss: ['orange', 'Directional miss'] };
   const cards = [
-    ['Products with catalog spend', int(t('withSpend')), d.catalog.window.from ? `${fmtDate(d.catalog.window.from)} – ${fmtDate(d.catalog.window.to)}` : 'no data'],
-    ['Enough spend to read', int(t('readable')), `≥ ${inr(d.settings.catalogMinSpend)} on the product ID`],
+    ['Products with spend', int(t('withSpend')), d.catalog.window.from ? `${fmtDate(d.catalog.window.from)} – ${fmtDate(d.catalog.window.to)}` : 'all campaigns incl. catalog'],
+    ['Enough spend to read', int(t('readable')), `≥ ${inr(d.settings.catalogMinSpend)} on the product`],
     ['Directional hit rate', t('readable') ? pc(t('hits') / t('readable') * 100) : '—', `Spend/GMV ≤ ${d.settings.winBar}% · biased upward`],
     ['Hits not yet trialled', int(t('queued')), 'go to the front of the trial queue']
   ];
@@ -257,11 +257,11 @@ function catalogCard(d) {
     <td class="r num ${i.sgmv !== null && i.sgmv <= d.settings.winBar ? 'good' : 'bad'}">${pc(i.sgmv)}</td>
     <td>${chip(...read[i.read])}</td>
     <td class="small">${i.trialed ? 'Already trialled' : i.read === 'hit' ? (i.live ? 'Queued for trial' : 'Hit, but not live') : 'Moved down the queue'}</td></tr>`).join('');
-  return `<section class="card" aria-label="Catalog signal">
-    <div class="card-head"><div><h2>Catalog signal ${chip('muted', 'Directional')}</h2><span class="muted small">Product-ID spend from catalog campaigns · feeds the trial queue, never Success%</span></div></div>
+  return `<section class="card" aria-label="Product signal">
+    <div class="card-head"><div><h2>Product signal · all campaigns incl. catalog ${chip('muted', 'Directional')}</h2><span class="muted small">Overall product-wise spend and Spend/GMV across every campaign, catalog included · feeds the trial queue, never Success%</span></div></div>
     <div class="kpis">${cards.map(([l, v, s]) => `<div class="kpi"><span class="label">${l}</span><span class="value num" style="font-size:22px">${v}</span><span class="sub">${esc(s)}</span></div>`).join('')}</div>
     ${rows ? `<div class="table-box"><table style="min-width:900px"><thead><tr><th>Product</th><th class="r">Spend</th><th class="r">Purchases</th><th class="r">GMV</th><th class="r">Spend/GMV</th><th>Read</th><th>Decision</th></tr></thead><tbody>${rows}</tbody></table></div>`
-      : `<p class="empty">${d.meta.sources.catalog.status === 'ok' ? 'No product has enough catalog spend to read yet.' : 'Connect the catalog question (MB_Q_CATALOG) to see this.'}</p>`}
+      : `<p class="empty">${d.meta.sources.catalog.status === 'ok' ? 'No product has enough spend to read yet.' : 'Connect the product-wise spend question (MB_Q_PRODUCT_SPEND) to see this.'}</p>`}
   </section>`;
 }
 
@@ -274,7 +274,7 @@ function logCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Catalog product spend', adsetMap: 'Ad set → product map' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product-wise spend (all campaigns)', adsetMap: 'Ad set → product map' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>

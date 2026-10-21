@@ -8,7 +8,7 @@ import { runCard, normRow } from './metabase.js';
 const SOURCES = {
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products' },
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
-  catalog: { env: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Catalog product spend' },
+  catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
   adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' }
 };
 export const SOURCE_NAMES = Object.keys(SOURCES);
@@ -30,11 +30,12 @@ export async function loadOne(name) {
         throw e;
       }
     }
-    const id = process.env[src.env];
+    const id = process.env[src.env] || (src.alt && process.env[src.alt]);
     if (!id) return { status: 'missing', origin: `${src.env} not set`, rows: [], loadedAt };
     const rows = await runCard(id);
     return { status: 'ok', origin: `Metabase Q${id}`, rows, loadedAt };
   } catch (e) {
-    return { status: 'error', origin: process.env[src.env] ? `Metabase Q${process.env[src.env]}` : src.env, error: e.message, rows: [], loadedAt };
+    const id = process.env[src.env] || (src.alt && process.env[src.alt]);
+    return { status: 'error', origin: id ? `Metabase Q${id}` : src.env, error: e.message, rows: [], loadedAt };
   }
 }

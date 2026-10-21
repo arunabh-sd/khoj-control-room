@@ -143,3 +143,18 @@ test('verdict window kills a product whose recent half is still bad', () => {
   const r = compute(src([product('1')], rows), S, []);
   assert.equal(r.trials[0].action, 'kill');
 });
+
+test('product signal: overall product spend with an accurate S/GMV column, no Meta correction', () => {
+  const rows = [
+    { product_id: '1', spend: '3000', s_gmv: '0.24' },   // fraction
+    { product_id: '2', spend: '2000', s_gmv: '45' },     // percent
+    { product_id: '3', spend: '800', s_gmv: '0.10' }     // too little spend to read
+  ];
+  const r = compute(src([product('1'), product('2'), product('3')], [], rows), DEFAULT_SETTINGS, []);
+  const by = (id) => r.catalog.items.find((i) => i.productId === id);
+  assert.equal(Math.round(by('1').sgmv), 24);
+  assert.equal(by('1').read, 'hit');
+  assert.equal(Math.round(by('2').sgmv), 45);
+  assert.equal(by('2').read, 'miss');
+  assert.equal(by('3').read, 'thin');
+});
