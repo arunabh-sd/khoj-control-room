@@ -142,14 +142,16 @@ function viewRoom(d) {
   const sum = (k) => pipe.reduce((a, p) => a + p[k], 0);
   const cov = d.coverage.filter((r) => inCat(r.key));
   const csum = (k) => cov.reduce((a, r) => a + r[k], 0);
+  const allCov = d.coverage.find((r) => r.key === 'Total') || { uploaded: 0, hero: 0 };
+  const scopeLabel = (l) => `${l} · ${ui.cat === 'All' ? '3 test categories' : ui.cat}`;
   const win = sum('scaling') + sum('lifecycle'), killed = sum('killed'), decided = win + killed;
   const p = decided ? win / decided : null;
   const ci = decided ? 1.96 * Math.sqrt(p * (1 - p) / decided) * 100 : null;
   const trials = d.trials.filter((t) => inCat(t.cat));
   const running = trials.filter((t) => !t.closed && ['continue', 'extend'].includes(t.action));
   const kpis = [
-    ['Uploaded to Khoj', int(csum('uploaded')), `${int(csum('live'))} live`],
-    ['Hero products', int(csum('hero')), `${int(csum('heroLive'))} hero and live`],
+    [scopeLabel('Uploaded to Khoj'), int(csum('uploaded')), `${int(csum('live'))} live · ${int(allCov.uploaded)} across all categories`],
+    [scopeLabel('Hero products'), int(csum('hero')), `${int(csum('heroLive'))} hero and live · ${int(allCov.hero)} across all categories`],
     ['Hero tested', int(sum('heroTested')), csum('hero') ? pc(sum('heroTested') / csum('hero') * 100, 1) + ' of hero pool' : ''],
     ['Success%', p === null ? '—' : pc(p * 100), decided ? `±${Math.round(ci)} pts · n = ${decided} decided` : 'no verdicts yet'],
     ['Live trials', int(running.length), `${inr(d.settings.trialDailyBudget)}/day each`],
