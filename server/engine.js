@@ -6,7 +6,14 @@ const CATS_ALL = [...TEST_CATEGORIES, 'Other'];
 export function num(v) {
   if (v === null || v === undefined || v === '') return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  const n = Number(String(v).replace(/[,₹%\s]/g, ''));
+  let s = String(v).replace(/[,₹%\s]/g, '');
+  // Compact formats in case a question is exported formatted: 1.2K, 3.4M, 2L (lakh), 1.1Cr
+  const m = s.match(/^(-?[\d.]+)(k|m|l|lakh|cr|crore)$/i);
+  if (m) {
+    const mult = { k: 1e3, m: 1e6, l: 1e5, lakh: 1e5, cr: 1e7, crore: 1e7 }[m[2].toLowerCase()];
+    s = String(Number(m[1]) * mult);
+  }
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 // Accepts YYYY-MM-DD(…), D-M-YYYY / D/M/YYYY (Metabase exports), or anything Date can parse.
@@ -324,6 +331,20 @@ export function compute(src, s, history, today = todayIST()) {
   const notes = [];
   const idx = buildProducts(src.products.rows, s);
   const { products } = idx;
+  // Products question health: required columns present, and numbers actually parse.
+  const prow = src.products.rows;
+  if (prow.length) {
+    const REQUIRED = ['khoj_product_id', 'khoj_cust_sku_ids', 'product_title', 'current_status', 'l30d_spend', 'l30d_orders', 'profit_pct_d40_d10', 'khoj_category_l2', 'khoj_category_l3', 'khoj_category_l4'];
+    const seen = new Set(Object.keys(prow[0]));
+    const missing = REQUIRED.filter((c) => !seen.has(c));
+    if (missing.length) notes.push(`Products question is missing column(s) ${missing.join(', ')}. Columns received: ${[...seen].join(', ')}.`);
+    for (const c of ['l30d_spend', 'l30d_orders', 'profit_pct_d40_d10']) {
+      if (!seen.has(c)) continue;
+      const bad = prow.filter((r) => r[c] !== null && r[c] !== '' && r[c] !== undefined && num(r[c]) === null).length;
+      if (bad) notes.push(`${bad.toLocaleString('en-IN')} of ${prow.length.toLocaleString('en-IN')} products have an unreadable ${c} (e.g. “${prow.find((r) => r[c] !== null && r[c] !== '' && num(r[c]) === null)[c]}”). Those products can't qualify as hero.`);
+    }
+    if (products.length < prow.length) notes.push(`${(prow.length - products.length).toLocaleString('en-IN')} product rows have no khoj_product_id and were skipped.`);
+  }
   const catAov = {};
   for (const c of CATS_ALL) {
     const ps = products.filter((p) => p.cat === c);

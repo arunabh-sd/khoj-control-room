@@ -11,6 +11,8 @@ export function normRow(row) {
   return out;
 }
 
+// Uses the export endpoint (no 2,000-row cap) with format_rows=false, so numbers arrive raw
+// (12000, not "12,000", "₹12k" or "1.2K") and column keys are the question's column names.
 export async function runCard(cardId) {
   const base = (process.env.METABASE_URL || '').replace(/\/+$/, '');
   const key = process.env.METABASE_API_KEY;
@@ -18,13 +20,16 @@ export async function runCard(cardId) {
   const res = await fetch(`${base}/api/card/${encodeURIComponent(cardId)}/query/json`, {
     method: 'POST',
     headers: { 'x-api-key': key, 'content-type': 'application/json' },
-    body: JSON.stringify({})
+    body: JSON.stringify({ format_rows: false, pivot_results: false, parameters: [] })
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`Metabase card ${cardId} returned ${res.status}: ${text.slice(0, 200)}`);
   }
   const data = await res.json();
-  if (!Array.isArray(data)) throw new Error(`Metabase card ${cardId} did not return a row list`);
+  if (!Array.isArray(data)) {
+    const hint = data && typeof data === 'object' ? ` (got keys: ${Object.keys(data).slice(0, 8).join(', ')})` : '';
+    throw new Error(`Metabase card ${cardId} did not return a row list${hint}`);
+  }
   return data.map(normRow);
 }

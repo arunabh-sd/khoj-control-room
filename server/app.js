@@ -4,6 +4,15 @@ import { loadOne, SOURCE_NAMES, SOURCE_LABELS } from './sources.js';
 import { compute } from './engine.js';
 import { DEFAULT_SETTINGS, SETTING_LABELS, mergeSettings } from './rules.js';
 
+// For the Data sources panel: what each column looks like in the first rows (type and a short shape, no values).
+function sampleTypes(rows) {
+  const out = {};
+  for (const [k, v] of Object.entries(rows[0] || {})) {
+    out[k] = v === null || v === undefined ? 'empty' : typeof v === 'number' ? 'number' : /^-?[\d.]+$/.test(String(v)) ? 'numeric text' : /[\d]/.test(String(v)) && /[,%₹kKmM]/.test(String(v)) ? 'formatted number' : 'text';
+  }
+  return out;
+}
+
 export function createApi(store) {
   const mem = {};   // warm-instance copy of the last Metabase pull per source
 
@@ -50,7 +59,8 @@ export function createApi(store) {
         loadedAt: sources.loadedAt,
         store: store.kind,
         sources: Object.fromEntries(['products', 'ads', 'catalog'].map((k) => [k, {
-          status: sources[k].status, origin: sources[k].origin, rows: sources[k].rows.length, error: sources[k].error || null
+          status: sources[k].status, origin: sources[k].origin, rows: sources[k].rows.length, error: sources[k].error || null,
+          columns: Object.keys(sources[k].rows[0] || {}), sample: sampleTypes(sources[k].rows)
         }]))
       },
       settings, settingLabels: SETTING_LABELS, defaults: DEFAULT_SETTINGS,
@@ -92,7 +102,7 @@ export function createApi(store) {
     if (srcMatch && req.method === 'POST') {
       if (!SOURCE_NAMES.includes(srcMatch[1])) return json(404, { error: 'Unknown source' });
       const r = await refreshSource(srcMatch[1]);
-      return json(200, { name: srcMatch[1], status: r.status, origin: r.origin, rows: r.rows.length, error: r.error || null, loadedAt: r.loadedAt });
+      return json(200, { name: srcMatch[1], status: r.status, origin: r.origin, rows: r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
     if (p === '/api/state' && req.method === 'GET') return json(200, await buildState());
 
