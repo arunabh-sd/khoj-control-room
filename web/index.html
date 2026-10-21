@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Khoj Control Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="title">
+      <div class="eyebrow">Khoj by ShopDeck <span id="freshness" class="chip chip-muted"></span></div>
+      <h1>Product Testing Control Room</h1>
+      <p class="muted">The rules engine makes every call. You execute the tasks it creates.</p>
+    </div>
+    <div class="top-actions">
+      <nav id="cats" class="pills" aria-label="Category"></nav>
+      <button id="refresh" class="btn" type="button">Refresh from Metabase</button>
+    </div>
+  </header>
+  <div id="tabs" class="tabs" role="tablist" aria-label="View"></div>
+  <div id="notices"></div>
+  <main id="view" aria-live="polite"><p class="muted">Loading…</p></main>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "khoj-control-room",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Khoj product testing control room: hero coverage, live trials, scale ladder, catalog signal and task log, driven by Metabase.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "fixtures": "node scripts/make-fixtures.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}
