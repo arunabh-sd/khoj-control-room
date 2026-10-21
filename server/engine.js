@@ -351,43 +351,52 @@ function decideScale(a, s) {
   return { action: 'hold', reason: `${mTxt} above ${s.winBar}% at the floor; lifecycle check running` };
 }
 
-// ---------- product signal (overall product-wise spend, all campaigns incl. catalog) ----------
-// Rows: one per product (optionally per day). Spend/GMV here is accurate, so no Meta correction is applied.
-// Accepts `gmv`, or a Spend/GMV column (`s_gmv`, `spend_gmv`, `speng_gmv`; a fraction like 0.24 or a percent like 24).
+// ---------- product signal (product-wise, day-wise spend across all campaigns incl. catalog: Q16674) ----------
+// Spend/GMV here is accurate, so no Meta correction is applied.
+// Step 1, eligibility: lifetime spend (every day in the question) at least `catalogMinSpend`.
+// Step 2, performance: Spend/GMV over the most recent `signalWindowShare` of spend (at least `signalWindowMin`),
+// the same idea as the trial verdict window, so early days don't decide the read.
+// Accepts product_spend/spend, product_gmv/gmv, or a Spend/GMV column (fraction or percent) when GMV is missing.
 function buildCatalog(rows, idx, s, trialedIds) {
-  const dates = rows.map((r) => day(r.date || r.spend_date)).filter(Boolean).sort();
-  const maxDate = dates.at(-1) || null;
-  const from = maxDate ? addDays(maxDate, -(s.catalogWindowDays - 1)) : null;
   const map = new Map();
+  let minDate = null, maxDate = null;
   for (const r of rows) {
     const d = day(r.date || r.spend_date);
-    if (from && d && d < from) continue;
+    if (d) { if (!minDate || d < minDate) minDate = d; if (!maxDate || d > maxDate) maxDate = d; }
     const p = resolveProduct(r, idx);
     const key = p ? p.id : String(r.product_id || r.sku_id || r.product_code || '');
     if (!key) continue;
     let g = map.get(key);
-    if (!g) { g = { key, product: p, spend: 0, purchases: 0, gmv: 0 }; map.set(key, g); }
-    const spend = num(r.spend) ?? num(r.product_spend) ?? 0;
-    let gmv = num(r.gmv) ?? num(r.purchase_value);
+    if (!g) { g = { key, product: p, byDate: new Map() }; map.set(key, g); }
+    const spend = num(r.product_spend) ?? num(r.spend) ?? 0;
+    let gmv = num(r.product_gmv) ?? num(r.gmv) ?? num(r.purchase_value);
     if (gmv === null) {
-      const ratio = num(r.s_gmv) ?? num(r.spend_gmv) ?? num(r.speng_gmv) ?? num(r.sgmv);
+      const ratio = num(r.product_spend_gmv) ?? num(r.s_gmv) ?? num(r.spend_gmv) ?? num(r.speng_gmv);
       if (ratio !== null && ratio > 0) gmv = spend / (ratio > 1.5 ? ratio / 100 : ratio);
     }
-    g.spend += spend;
-    g.gmv += gmv || 0;
-    g.purchases += num(r.purchases) ?? num(r.orders) ?? 0;
+    const cur = g.byDate.get(d || '') || { date: d, spend: 0, gmv: 0 };
+    cur.spend += spend; cur.gmv += gmv || 0;
+    g.byDate.set(d || '', cur);
   }
   const items = [...map.values()].map((g) => {
-    const sg = pct(g.spend, g.gmv);
-    const read = g.spend < s.catalogMinSpend ? 'thin' : sg !== null && sg <= s.winBar ? 'hit' : 'miss';
+    const days = [...g.byDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const spend = days.reduce((a, x) => a + x.spend, 0);
+    const gmv = days.reduce((a, x) => a + x.gmv, 0);
+    const need = Math.max(s.signalWindowMin, spend * s.signalWindowShare);
+    let rs = 0, rg = 0, from = null;
+    for (let i = days.length - 1; i >= 0; i--) { rs += days[i].spend; rg += days[i].gmv; from = days[i].date; if (rs >= need) break; }
+    const recentOk = rs >= need && rs < spend;
+    const sgRecent = recentOk ? pct(rs, rg) : pct(spend, gmv);
+    const read = spend < s.catalogMinSpend ? 'thin' : sgRecent !== null && sgRecent <= s.winBar ? 'hit' : 'miss';
     return {
       productId: g.product?.id || g.key, name: g.product?.title || g.key, cat: g.product?.cat || 'Other',
       hero: !!g.product?.hero, live: !!g.product?.live, linked: !!g.product,
-      spend: g.spend, purchases: g.purchases, gmv: g.gmv, sgmv: sg, read,
-      trialed: g.product ? trialedIds.has(g.product.id) : false
+      spend, gmv, lifetimeSgmv: pct(spend, gmv),
+      sgmv: sgRecent, recentSpend: recentOk ? rs : null, recentFrom: recentOk ? from : null,
+      read, trialed: g.product ? trialedIds.has(g.product.id) : false
     };
   }).sort((a, b) => b.spend - a.spend);
-  return { items, from: dates.length ? (from < dates[0] ? dates[0] : from) : null, to: maxDate, unlinked: items.filter((i) => !i.linked).length };
+  return { items, from: minDate, to: maxDate, unlinked: items.filter((i) => !i.linked && i.read !== 'thin').length };
 }
 
 // ---------- main ----------
@@ -467,7 +476,7 @@ export function compute(src, s, history, today = todayIST()) {
 
   const trialedIds = new Set(trials.filter((t) => t.product).map((t) => t.product.id));
   const catalog = buildCatalog(src.catalog.rows, idx, s, trialedIds);
-  if (catalog.unlinked) notes.push(`${catalog.unlinked} product(s) in the product-wise spend question don't match a Khoj product id or SKU id in the products question.`);
+  if (catalog.unlinked) notes.push(`${catalog.unlinked} product(s) in the product-wise spend question with enough spend don't match a Khoj product id or SKU id in the products question.`);
 
   // product outcome status
   const statusOf = new Map();
@@ -583,7 +592,7 @@ export function compute(src, s, history, today = todayIST()) {
       if (!pick) break;
       const p = pick.p;
       const ch = catalogHit.get(p.id);
-      const srcTxt = pick.source === 'catalog' ? `product signal (overall Spend/GMV ${p0(ch.sgmv)} on ${inr(ch.spend)})`
+      const srcTxt = pick.source === 'catalog' ? `product signal (recent Spend/GMV ${p0(ch.sgmv)}, ${inr(ch.spend)} lifetime spend)`
         : pick.source === 'tierA' ? `hero, ${p.orders.toLocaleString('en-IN')} seller orders in 30 days`
         : pick.source === 'tierB' ? `hero, ${p.orders} seller orders, profit ${p.profit?.toFixed(1)}%`
         : 'control group (no seller demand proof)';

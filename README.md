@@ -21,7 +21,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_PRODUCTS` | `16450` |
 | `MB_Q_ADS` | `16659` |
 | `MB_Q_ADSET_MAP` | `16676` (ad set → product) |
-| `MB_Q_PRODUCT_SPEND` | overall product-wise spend question, when it exists |
+| `MB_Q_PRODUCT_SPEND` | `16674` (product-wise spend, all campaigns) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
 3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
@@ -71,11 +71,14 @@ A row links an ad set to a product only if that product took **at least 50% of t
 
 Better: drop the `QUALIFY … = 1` so every product per ad set comes through; the title check can then find the right product even when the top one is noise.
 
-### Product-wise spend, all campaigns (`MB_Q_PRODUCT_SPEND`)
+### Product-wise spend, all campaigns (`MB_Q_PRODUCT_SPEND`: Q16674)
 
-Overall spend and Spend/GMV per product across every campaign, catalog included. One row per product (or per product per day, then the last 14 days are used): `product_id` (Khoj product id or SKU id), `spend`, and either `gmv` or a Spend/GMV column (`s_gmv`, as 0.24 or 24). This Spend/GMV is taken as accurate: the ×0.9 correction applies only to the ads question.
+Product-wise, day-wise spend and GMV across every campaign, catalog included: `seller_id, product_id, spend_date, product_spend, product_gmv, product_spend_gmv`. `product_id` is the Khoj product id. This Spend/GMV is accurate, so the ×0.9 correction (ads question only) is not applied.
 
-Products with at least ₹1,500 of spend and Spend/GMV ≤ 30% are directional hits and go to the front of the trial queue. Never counted in Success%.
+1. **Eligibility:** lifetime spend on the product (every day in the question) of at least ₹1,500.
+2. **Performance:** Spend/GMV over the most recent half of that spend (at least ₹1,000), so early days don't decide the read. Lifetime Spend/GMV is shown alongside.
+
+Eligible products with recent Spend/GMV ≤ 30% are directional hits and go to the front of the trial queue. Never counted in Success%.
 
 ## Rules (defaults)
 
@@ -88,7 +91,7 @@ Products with at least ₹1,500 of spend and Spend/GMV ≤ 30% are directional h
 | Ladder | ₹1,000 → 1,500 → 2,250 → 3,400 → 5,000/day. After 3 days at a step: marginal Spend/GMV < 25% step up; 25–30% hold; > 30% step down (ceiling recorded) |
 | Lifecycle | 14 days above 30% Spend/GMV at the floor budget → lifecycle ended |
 | New trials | 4 live trials per test category; free slots refilled from live untested hero products: catalog hits first, then 300+ order products, then 30–299; about 15% go to control products |
-| Product signal | Products with ≥ ₹1,500 overall spend (all campaigns incl. catalog): Spend/GMV ≤ 30% = directional hit (queues the product), otherwise a miss. Never counted in Success%. |
+| Product signal | Eligible after ₹1,500 lifetime spend (all campaigns incl. catalog); read on the most recent half of spend (min ₹1,000): Spend/GMV ≤ 30% = directional hit (queues the product), otherwise a miss. Never counted in Success%. |
 
 ## Local development
 

@@ -247,20 +247,20 @@ function catalogCard(d) {
   const read = { hit: ['green', 'Directional hit'], miss: ['orange', 'Directional miss'] };
   const cards = [
     ['Products with spend', int(t('withSpend')), d.catalog.window.from ? `${fmtDate(d.catalog.window.from)} – ${fmtDate(d.catalog.window.to)}` : 'all campaigns incl. catalog'],
-    ['Enough spend to read', int(t('readable')), `≥ ${inr(d.settings.catalogMinSpend)} on the product`],
-    ['Directional hit rate', t('readable') ? pc(t('hits') / t('readable') * 100) : '—', `Spend/GMV ≤ ${d.settings.winBar}% · biased upward`],
+    ['Eligible', int(t('readable')), `≥ ${inr(d.settings.catalogMinSpend)} lifetime spend`],
+    ['Directional hit rate', t('readable') ? pc(t('hits') / t('readable') * 100) : '—', `recent Spend/GMV ≤ ${d.settings.winBar}% · biased upward`],
     ['Hits not yet trialled', int(t('queued')), 'go to the front of the trial queue']
   ];
   const rows = items.map((i) => `<tr>
     <td><div class="prod"><span class="name">${esc(i.name)}</span><span class="muted small">${esc(i.cat)}${i.hero ? ' · hero' : ''}${i.live ? '' : ' · not live'}</span></div></td>
-    <td class="r num">${inr(i.spend)}</td><td class="r num">${int(i.purchases)}</td><td class="r num">${inr(i.gmv)}</td>
-    <td class="r num ${i.sgmv !== null && i.sgmv <= d.settings.winBar ? 'good' : 'bad'}">${pc(i.sgmv)}</td>
+    <td class="r num">${inr(i.spend)}</td><td class="r num">${inr(i.gmv)}</td>
+    <td class="r"><div class="num ${i.sgmv !== null && i.sgmv <= d.settings.winBar ? 'good' : 'bad'}"${i.recentSpend ? ` title="Last ${inr(i.recentSpend)} of spend, from ${fmtDate(i.recentFrom)}"` : ''}>${i.sgmv === null ? 'no GMV' : pc(i.sgmv)}${i.recentSpend ? ' <span class="small muted">recent</span>' : ''}</div><div class="num small muted">lifetime ${i.lifetimeSgmv === null ? 'no GMV' : pc(i.lifetimeSgmv)}</div></td>
     <td>${chip(...read[i.read])}</td>
     <td class="small">${i.trialed ? 'Already trialled' : i.read === 'hit' ? (i.live ? 'Queued for trial' : 'Hit, but not live') : 'Moved down the queue'}</td></tr>`).join('');
   return `<section class="card" aria-label="Product signal">
-    <div class="card-head"><div><h2>Product signal · all campaigns incl. catalog ${chip('muted', 'Directional')}</h2><span class="muted small">Overall product-wise spend and Spend/GMV across every campaign, catalog included · feeds the trial queue, never Success%</span></div></div>
+    <div class="card-head"><div><h2>Product signal · all campaigns incl. catalog ${chip('muted', 'Directional')}</h2><span class="muted small">Product-wise spend across every campaign, catalog included · eligible after ${inr(d.settings.catalogMinSpend)} lifetime spend, read on the most recent ${Math.round(d.settings.signalWindowShare * 100)}% of spend (min ${inr(d.settings.signalWindowMin)}) · feeds the trial queue, never Success%</span></div></div>
     <div class="kpis">${cards.map(([l, v, s]) => `<div class="kpi"><span class="label">${l}</span><span class="value num" style="font-size:22px">${v}</span><span class="sub">${esc(s)}</span></div>`).join('')}</div>
-    ${rows ? `<div class="table-box"><table style="min-width:900px"><thead><tr><th>Product</th><th class="r">Spend</th><th class="r">Purchases</th><th class="r">GMV</th><th class="r">Spend/GMV</th><th>Read</th><th>Decision</th></tr></thead><tbody>${rows}</tbody></table></div>`
+    ${rows ? `<div class="table-box"><table style="min-width:900px"><thead><tr><th>Product</th><th class="r">Lifetime spend</th><th class="r">Lifetime GMV</th><th class="r">Spend/GMV</th><th>Read</th><th>Decision</th></tr></thead><tbody>${rows}</tbody></table></div>`
       : `<p class="empty">${d.meta.sources.catalog.status === 'ok' ? 'No product has enough spend to read yet.' : 'Connect the product-wise spend question (MB_Q_PRODUCT_SPEND) to see this.'}</p>`}
   </section>`;
 }

@@ -158,3 +158,17 @@ test('product signal: overall product spend with an accurate S/GMV column, no Me
   assert.equal(by('2').read, 'miss');
   assert.equal(by('3').read, 'thin');
 });
+
+test('product signal (Q16674 shape): lifetime spend for eligibility, recent spend for the read', () => {
+  const rows = [
+    { product_id: '1', spend_date: '11-10-2026', product_spend: '1500', product_gmv: '1500' },   // early: 100%
+    { product_id: '1', spend_date: '18-10-2026', product_spend: '1500', product_gmv: '6000' },   // recent: 25%
+    { product_id: '2', spend_date: '18-10-2026', product_spend: '900', product_gmv: '9000' }     // under ₹1,500 lifetime
+  ];
+  const r = compute(src([product('1'), product('2')], [], rows), DEFAULT_SETTINGS, []);
+  const p1 = r.catalog.items.find((i) => i.productId === '1');
+  assert.equal(Math.round(p1.lifetimeSgmv), 40);
+  assert.equal(Math.round(p1.sgmv), 25);
+  assert.equal(p1.read, 'hit');
+  assert.equal(r.catalog.items.find((i) => i.productId === '2').read, 'thin');
+});

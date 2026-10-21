@@ -30,8 +30,9 @@ export const DEFAULT_SETTINGS = {
   lifecycleDays: 14,            // days above winBar at the floor budget = lifecycle ended
 
   // Product signal (overall product-wise spend, all campaigns incl. catalog)
-  catalogMinSpend: 1500,        // minimum spend on a product to read it
-  catalogWindowDays: 14,        // look-back when the question has a date column
+  catalogMinSpend: 1500,        // eligibility: lifetime spend on the product
+  signalWindowShare: 0.5,       // performance: most recent share of that spend...
+  signalWindowMin: 1000,        // ...covering at least this many rupees
 
   // Meta reporting correction for the ads question only: actual Spend/GMV = reported × this (Q16659 reads ~10% high).
   // Not applied to the product-wise spend question, whose Spend/GMV is accurate.
@@ -64,8 +65,9 @@ export const SETTING_LABELS = {
   graduateBudget: ['Ladder', 'First scale budget after graduation (₹)'],
   overlapDays: ['Ladder', 'Days to keep the trial on after graduating'],
   lifecycleDays: ['Ladder', 'Lifecycle ends after N days above the bar at the floor'],
-  catalogMinSpend: ['Product signal', 'Minimum product spend to read (₹)'],
-  catalogWindowDays: ['Product signal', 'Look-back window (days, if the question has dates)'],
+  catalogMinSpend: ['Product signal', 'Eligible after lifetime spend of (₹)'],
+  signalWindowShare: ['Product signal', 'Performance window: most recent share of spend (0.5 = last half)'],
+  signalWindowMin: ['Product signal', 'Performance window: at least this much recent spend (₹)'],
   metaSgmvFactor: ['Data', 'Ads question Spend/GMV correction: actual = reported × this'],
   testingMatch: ['Naming', 'Trial campaigns contain'],
   scaleMatch: ['Naming', 'Scale campaigns contain']
