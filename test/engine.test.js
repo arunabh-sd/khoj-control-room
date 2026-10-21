@@ -102,3 +102,24 @@ test('paused trial before verdict is closed as stopped and frees the slot', () =
   assert.equal(actionOf(r, 'a1'), 'stopped');
   assert.equal(actionOf(r, 'a2'), 'continue');
 });
+
+test('ad set → product map: trusts ≥50% share or a title match, and links copies by name', () => {
+  const prods = [product('1', { product_title: 'Banarasi Semi-Silk Saree' }), product('2', { product_title: 'Kota Doria Kurtis' }), product('3', { product_title: 'Magenta Shraddha Narayanpet Cotton' })];
+  const ads = [
+    day('x1', 4000, 9000, { adset_id: 'A1', adset_name: 'Saree | Banarasi Semi-Silk | Creatives', product_id: '' }),
+    day('x2', 3000, 9000, { adset_id: 'A2', adset_name: 'Saree | Banarasi Semi-Silk | Creatives', product_id: '', campaign_name: 'KHJ | Testing | Saree – Copy' }),
+    day('x3', 2000, 4000, { adset_id: 'B1', adset_name: 'Saree | Magenta Shraddha Narayanpet | Creatives', product_id: '' }),
+    day('x4', 2000, 4000, { adset_id: 'C1', adset_name: 'Saree | Royal Blue | Creatives', product_id: '' })
+  ];
+  const map = [
+    { adset_id: 'A2', product_id: '1', product_spend: 2700, share_of_adset: 0.9 },
+    { adset_id: 'B1', product_id: '3', product_spend: 100, share_of_adset: 0.05 },
+    { adset_id: 'C1', product_id: '2', product_spend: 90, share_of_adset: 0.04 }
+  ];
+  const r = compute({ ...src(prods, ads), adsetMap: { status: 'ok', rows: map } }, S, []);
+  const by = (n) => r.trials.find((t) => t.name.includes(n));
+  assert.equal(by('Banarasi').product, 'Banarasi Semi-Silk Saree');
+  assert.equal(by('Banarasi').spend, 7000);           // original A1 linked through its copy's name
+  assert.equal(by('Magenta').product, 'Magenta Shraddha Narayanpet Cotton'); // low share, title matches
+  assert.equal(by('Royal Blue').product, null);        // low share, no title match → not trusted
+});

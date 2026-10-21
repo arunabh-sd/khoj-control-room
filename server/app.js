@@ -45,7 +45,7 @@ export function createApi(store) {
     await store.upsertTasks(result.tasks);
 
     const generated = new Set(result.tasks.map((t) => t.id));
-    const healthy = ['products', 'ads', 'catalog'].every((k) => sources[k].status !== 'error');
+    const healthy = SOURCE_NAMES.every((k) => sources[k].status !== 'error');
     if (healthy) {
       const open = (await store.listTasks()).filter((t) => !t.done_at && !generated.has(t.id)).map((t) => t.id);
       await store.autoClose(open);
@@ -58,7 +58,7 @@ export function createApi(store) {
       meta: {
         loadedAt: sources.loadedAt,
         store: store.kind,
-        sources: Object.fromEntries(['products', 'ads', 'catalog'].map((k) => [k, {
+        sources: Object.fromEntries(SOURCE_NAMES.map((k) => [k, {
           status: sources[k].status, origin: sources[k].origin, rows: sources[k].rows.length, error: sources[k].error || null,
           columns: Object.keys(sources[k].rows[0] || {}), sample: sampleTypes(sources[k].rows)
         }]))
@@ -98,7 +98,7 @@ export function createApi(store) {
     if (!authorised(req)) return new Response('Password required', { status: 401, headers: { 'www-authenticate': 'Basic realm="Khoj Control Room"' } });
 
     if (p === '/api/sources' && req.method === 'GET') return json(200, { sources: SOURCE_NAMES.map((n) => ({ name: n, label: SOURCE_LABELS[n] })) });
-    const srcMatch = p.match(/^\/api\/sources\/([a-z]+)$/);
+    const srcMatch = p.match(/^\/api\/sources\/([A-Za-z]+)$/);
     if (srcMatch && req.method === 'POST') {
       if (!SOURCE_NAMES.includes(srcMatch[1])) return json(404, { error: 'Unknown source' });
       const r = await refreshSource(srcMatch[1]);

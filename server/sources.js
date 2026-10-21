@@ -8,7 +8,8 @@ import { runCard, normRow } from './metabase.js';
 const SOURCES = {
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products' },
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
-  catalog: { env: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Catalog product spend' }
+  catalog: { env: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Catalog product spend' },
+  adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' }
 };
 export const SOURCE_NAMES = Object.keys(SOURCES);
 export const SOURCE_LABELS = Object.fromEntries(SOURCE_NAMES.map((k) => [k, SOURCES[k].label]));

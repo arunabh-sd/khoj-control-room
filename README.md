@@ -20,6 +20,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `METABASE_API_KEY` | your Metabase API key |
 | `MB_Q_PRODUCTS` | `16450` |
 | `MB_Q_ADS` | `16659` |
+| `MB_Q_ADSET_MAP` | `16676` (ad set → product) |
 | `MB_Q_CATALOG` | catalog product-spend question, when it exists |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
@@ -61,6 +62,14 @@ How the engine reads it:
 - Reported GMV is corrected: actual Spend/GMV = reported × 0.9 (Rules → Data).
 - Trials paused before their verdict are closed as "Stopped early" and count as losses in Success%.
 - Trailing days with almost no account spend are treated as data lag; ad sets are judged as of the last real day.
+
+### Ad set → product map (`MB_Q_ADSET_MAP`: Q16676)
+
+Top-spend product per ad set from `nushop.fb_true_spend`: `campaign_id, adset_id, product_id, product_spend, adset_spend, share_of_adset`. `product_id` here is the Khoj product id (`khoj_product_id`); SKU ids are accepted too.
+
+A row links an ad set to a product only if that product took **at least 50% of the ad set's spend**, or its title shares at least two distinctive words with the ad set name. Low-share "top products" (around 4–5%) are usually the same few products showing up in every ad set and are ignored. A link on a copy also applies to the original ad set with the same name.
+
+Better: drop the `QUALIFY … = 1` so every product per ad set comes through; the title check can then find the right product even when the top one is noise.
 
 ### 3. Catalog product spend (`MB_Q_CATALOG`, to build)
 

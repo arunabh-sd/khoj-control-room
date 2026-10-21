@@ -26,6 +26,44 @@ export function day(v) {
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
+const STOP = new Set(['creatives', 'creative', 'saree', 'sarees', 'kurti', 'kurtis', 'jewellery', 'trial', 'testing', 'scale', 'and', 'with', 'for', 'the', 'set', 'pack', 'copy']);
+const words = (s) => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w));
+
+// Ad set → product, from the spend-by-product question (Q16676). A row counts only if the product took at least
+// half the ad set's spend, or if its title shares at least two distinctive words with the ad set name
+// (low-share "top products" are usually site-wide noise, e.g. the same product showing ~4% in every ad set).
+function buildAdsetMap(mapRows, adRows, idx, relevant = () => true) {
+  const nameOf = new Map();
+  const keep = new Set();
+  for (const r of adRows) {
+    if (r.adset_id && r.adset_name) nameOf.set(String(r.adset_id), r.adset_name);
+    if (r.adset_id && relevant(r)) keep.add(String(r.adset_id));
+  }
+  const byAdset = new Map();
+  for (const r of mapRows) {
+    const adset = String(r.adset_id || '');
+    if (!adset) continue;
+    const pid = String(r.product_id || r.sku_id || '').trim();
+    const p = idx.bySku.get(pid) || idx.byId.get(pid) || idx.byCode.get(pid);
+    if (!p) continue;
+    const spend = num(r.product_spend) || 0;
+    const share = num(r.share_of_adset) ?? (num(r.adset_spend) ? spend / num(r.adset_spend) : null);
+    (byAdset.get(adset) || byAdset.set(adset, []).get(adset)).push({ p, spend, share });
+  }
+  const out = new Map();
+  let rejected = 0;
+  for (const [adset, cands] of byAdset) {
+    cands.sort((a, b) => b.spend - a.spend);
+    const nameWords = new Set(words(normName(nameOf.get(adset) || '')));
+    const overlap = (p) => words(p.title).filter((w) => nameWords.has(w)).length;
+    const strong = cands.find((c) => c.share !== null && c.share >= 0.5);
+    const titled = cands.map((c) => ({ c, o: overlap(c.p) })).filter((x) => x.o >= 2).sort((a, b) => b.o - a.o || b.c.spend - a.c.spend)[0];
+    const pick = strong ? strong.p : titled ? titled.c.p : null;
+    if (pick) out.set(adset, pick); else if (keep.has(adset)) rejected++;
+  }
+  return { map: out, rejected };
+}
+
 const normName = (s) => String(s || '').replace(/\s*[–—-]\s*copy(\s*\d+)?\s*$/i, '').replace(/\s+/g, ' ').trim();
 const pct = (a, b) => (b > 0 ? (a / b) * 100 : null);
 const median = (xs) => {
@@ -112,6 +150,7 @@ function coverage(products) {
 // ---------- ads ----------
 // Meta "product id" = Khoj SKU id (khoj_cust_sku_ids). Also accepts product id/code, or a code inside the ad set name.
 function resolveProduct(r, idx) {
+  if (r._product) return r._product;
   for (const k of ['sku_id', 'product_id', 'khoj_sku_id', 'retailer_id', 'content_id']) {
     const v = r[k];
     if (v && idx.bySku.has(String(v).trim())) return idx.bySku.get(String(v).trim());
@@ -361,13 +400,26 @@ export function compute(src, s, history, today = todayIST()) {
   const isTrial = (r) => String(r.campaign_name || '').toLowerCase().includes(tm);
   const isScale = (r) => !isTrial(r) && String(r.campaign_name || '').toLowerCase().includes(sm);
   // A trial is one product: its original ad set and any "– Copy" duplicates are summed together.
+  // Link ad sets to products through the ad set → product map; an original and its "– Copy" share the link by name.
+  const adsetMap = buildAdsetMap(src.adsetMap?.rows || [], src.ads.rows, idx, (r) => isTrial(r) || isScale(r));
+  const nameProduct = new Map();
+  for (const r of src.ads.rows) {
+    const p = adsetMap.map.get(String(r.adset_id));
+    if (p && (isTrial(r) || isScale(r))) nameProduct.set(normName(r.adset_name).toLowerCase(), p);
+  }
+  const adRows = src.ads.rows.map((r) => {
+    const p = adsetMap.map.get(String(r.adset_id)) || ((isTrial(r) || isScale(r)) ? nameProduct.get(normName(r.adset_name).toLowerCase()) : null);
+    return p ? { ...r, _product: p } : r;
+  });
+  if (adsetMap.rejected) notes.push(`${adsetMap.rejected} trial/scale ad set(s) in the ad set → product map were ignored: their top product had under 50% of the ad set's spend and its title doesn't match the ad set name.`);
+
   const { refDate, lastDate } = referenceDate(src.ads.rows);
   if (refDate && lastDate && refDate < lastDate) notes.push(`Ad data after ${refDate} looks incomplete (almost no spend), so ad sets are judged as of ${refDate}.`);
-  const trials = groupAdsets(src.ads.rows.filter(isTrial), idx, s,
+  const trials = groupAdsets(adRows.filter(isTrial), idx, s,
     (r, p) => (p ? 'p:' + p.id : 'n:' + normName(r.adset_name).toLowerCase()), refDate);
-  const scales = groupAdsets(src.ads.rows.filter(isScale), idx, s, (_r, _p, adsetId) => 'a:' + adsetId, refDate);
+  const scales = groupAdsets(adRows.filter(isScale), idx, s, (_r, _p, adsetId) => 'a:' + adsetId, refDate);
   const unmatched = [...trials, ...scales].filter((a) => !a.product);
-  if (unmatched.length) notes.push(`${unmatched.length} trial/scale ad set group(s) aren't linked to a Khoj product, so they count in trial decisions but not in hero coverage or Success% by source. Add the SKU id to the ads question (or to the ad set name) to link them.`);
+  if (unmatched.length) notes.push(`${unmatched.length} trial/scale ad set group(s) aren't linked to a Khoj product (not in the ad set → product map, or its match was too weak), so they count in trial decisions but not in hero coverage or Success% by source.`);
 
   const ctx = { extended, catAov };
   const closedNow = [];
@@ -472,11 +524,12 @@ export function compute(src, s, history, today = todayIST()) {
     }
   }
 
-  // Until ad sets carry a SKU id, skip queue products whose title contains every distinctive word of an unlinked trial's name,
-  // so a product already tested isn't suggested again.
-  const STOP = new Set(['creatives', 'creative', 'saree', 'sarees', 'kurti', 'kurtis', 'jewellery', 'trial', 'testing', 'scale', 'and', 'with', 'for', 'the', 'set']);
-  const words = (s) => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w));
+  // For trials still not linked to a product, skip queue products whose title contains every distinctive word of the
+  // trial's name, so a product already tested isn't suggested again.
   const unlinkedSigs = trials.filter((t) => !t.product).map((t) => words(t.name)).filter((w) => w.length >= 2);
+  // The same product is often listed by several sellers under one title: once one listing is tested, skip the rest.
+  const titleKey = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const testedTitles = new Set(trials.filter((t) => t.product).map((t) => titleKey(t.product.title)));
   const looksTested = (p) => { const tw = new Set(words(p.title)); return unlinkedSigs.some((sig) => sig.every((w) => tw.has(w))); };
 
   // new trials to fill free slots
@@ -488,7 +541,7 @@ export function compute(src, s, history, today = todayIST()) {
   for (const c of TEST_CATEGORIES) {
     const running = trials.filter((t) => t.cat === c && !t.closed && ['continue', 'extend'].includes(t.decision.action)).length;
     const free = Math.max(0, s.slotsPerCategory - running);
-    const pool = products.filter((p) => p.cat === c && p.live && !trialedIds.has(p.id) && !looksTested(p));
+    const pool = products.filter((p) => p.cat === c && p.live && !trialedIds.has(p.id) && !testedTitles.has(titleKey(p.title)) && !looksTested(p));
     const heroQ = pool.filter((p) => p.hero).map((p) => {
       const ch = catalogHit.get(p.id);
       return { p, source: ch ? 'catalog' : p.tier === 'A' ? 'tierA' : 'tierB', score: ch ? 3e9 - (ch.sgmv || 0) : p.tier === 'A' ? 2e9 + p.orders : 1e9 + (p.profit || 0) * 1000 + p.orders };
