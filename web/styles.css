@@ -114,3 +114,19 @@ tr.sel td { background: #F2F4FD; }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kpi .value { font-size: 22px; }
 }
+
+.progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 10; background: transparent; }
+.progress > span { display: block; height: 100%; width: 0; background: var(--blue); transition: width .2s ease-out; }
+.loader { max-width: 560px; margin: 24px auto; }
+.loader .bar { min-width: 0; }
+.loader .bar > span { transition: width .2s ease-out; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.step { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.step.todo { color: var(--muted); }
+.step.now { font-weight: 600; }
+.step .muted { margin-left: auto; }
+.step-ok { width: 18px; height: 18px; border-radius: 50%; background: var(--green-bg); color: var(--green-fg); font-size: 12px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; flex: none; }
+.step-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--blue-bg); border-top-color: var(--blue); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } .progress > span, .loader .bar > span { transition: none; } }

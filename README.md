@@ -9,11 +9,10 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 - **Task log**: New trials to start, Kills, Scales. Tick when done; tasks also close themselves once the data shows the change (ad set paused, budget moved, trial started).
 - **Rules**: every threshold the engine uses, editable and saved to Postgres.
 
-## Deploy on Railway
+## Deploy on Netlify
 
-1. Push this repo to GitHub and create a Railway project from it.
-2. Add the **PostgreSQL** plugin to the project. Railway sets `DATABASE_URL` for you.
-3. Set variables on the service:
+1. In Netlify: **Add new site → Import an existing project → GitHub →** `arunabh-sd/khoj-control-room`. The settings come from `netlify.toml` (publish `web/`, functions in `netlify/functions/`, no build step).
+2. **Site configuration → Environment variables**, add:
 
 | Variable | Value |
 |---|---|
@@ -21,15 +20,20 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `METABASE_API_KEY` | your Metabase API key |
 | `MB_Q_PRODUCTS` | `16450` |
 | `MB_Q_ADS` | `16659` |
-| `MB_Q_CATALOG` | ID of the catalog product-spend question (below) |
-| `CACHE_TTL_MIN` | optional, default `30` |
+| `MB_Q_CATALOG` | catalog product-spend question, when it exists |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
-4. Deploy. Railway runs `npm install` and `npm start`; the health check is `/healthz`.
+3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
 
-Railway's outbound IPs must be able to reach your Metabase. If Metabase is behind an IP allowlist, add Railway's egress IPs (or use a Railway static outbound IP).
+**When Metabase is called:** only when the page opens and when you click "Refresh from Metabase". Each question runs as its own request, with a progress bar per step. Ticking tasks and saving rules reuse the last pull and never query Metabase.
 
-The API key never reaches the browser: only the server calls Metabase.
+**Limits to know:**
+- Netlify functions time out at 10 seconds by default (26 s on paid plans, set per site under Functions). Each Metabase question has to return within that. If Q16450 gets slow, trim its columns or add a filter.
+- Netlify's outbound IPs aren't fixed. If Metabase only accepts allowlisted IPs, it will refuse Netlify; open the API to the internet behind the API key, or put a small proxy with a static IP in front.
+
+### Any other Node host (Railway, Render, a VM)
+
+`npm install && npm start`, set the same variables plus `DATABASE_URL` for Postgres (without it, ticks live in memory). `railway.json` is included for Railway.
 
 ## Metabase questions
 
@@ -82,7 +86,7 @@ One row **per product ID per day** from catalog campaigns (Ads Manager breakdown
 ```bash
 npm install
 cp .env.example .env      # fill in, or use DATA_DIR for offline work
-node --env-file=.env server/index.js
+node --env-file=.env server/index.js   # or: npx netlify dev
 ```
 
 Offline: put a Metabase CSV export of Q16450 at `data/products.csv`, run `DATA_DIR=./data npm run fixtures` to generate synthetic `ads.csv` and `catalog.csv`, then `DATA_DIR=./data npm start`. `data/` is git-ignored; never commit real seller data.
@@ -92,11 +96,13 @@ Tests: `npm test`.
 ## Layout
 
 ```
-server/index.js       HTTP server and API (/api/state, /api/tasks/:id, /api/settings)
+server/app.js         API as Request → Response (/api/sources/:name, /api/state, /api/tasks/:id, /api/settings)
+server/index.js       local Node server: serves web/ and the API
+netlify/functions/    Netlify Function wrapping the same API
 server/engine.js      rules engine: hero, trials, ladder, catalog, pipeline, tasks
 server/rules.js       default settings and labels
 server/metabase.js    Metabase card runner
 server/sources.js     loads Metabase questions (or CSVs in DATA_DIR)
-server/store.js       Postgres (or in-memory) store for tasks, decisions, settings
+server/store.js       Netlify Blobs, Postgres or in-memory store for tasks, decisions, settings, last pull
 web/                  front end (no build step)
 ```

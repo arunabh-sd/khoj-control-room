@@ -22,16 +22,82 @@ const ACTION = {
 };
 const actionChip = (a) => { const [c, t] = ACTION[a] || ['muted', a]; return chip(c, t); };
 
-async function load(refresh = false) {
-  ui.busy = true; renderChrome();
+// ---------- loading ----------
+// pull = true: run each Metabase question (page load and the Refresh button only), then apply the rules.
+// pull = false: re-apply the rules to the last pull (after saving rules); never calls Metabase.
+const progress = { steps: [], current: -1 };
+let creep = null;
+
+function setStep(i) {
+  progress.current = i;
+  const n = progress.steps.length;
+  const from = (i / n) * 100, to = ((i + 1) / n) * 100;
+  let pct = from;
+  clearInterval(creep);
+  // Inside a step there is no real progress signal from Metabase, so the bar eases toward the step's end.
+  creep = setInterval(() => { pct += (to - 2 - pct) * 0.08; paintProgress(pct); }, 200);
+  paintProgress(from);
+  renderLoader();
+}
+function paintProgress(pct) {
+  const bar = document.querySelector('#progress > span');
+  if (bar) bar.style.width = Math.min(100, pct).toFixed(1) + '%';
+  const big = document.querySelector('.loader .bar > span');
+  if (big) big.style.width = Math.min(100, pct).toFixed(1) + '%';
+  const label = document.querySelector('.loader .pct');
+  if (label) label.textContent = Math.round(pct) + '%';
+}
+function finishProgress() {
+  clearInterval(creep);
+  paintProgress(100);
+  setTimeout(() => { $('progress').hidden = true; paintProgress(0); }, 400);
+}
+
+function renderLoader() {
+  const steps = progress.steps.map((s, i) => {
+    const state = i < progress.current ? 'done' : i === progress.current ? 'now' : 'todo';
+    const icon = state === 'done' ? '<span class="step-ok" aria-hidden="true">✓</span>' : state === 'now' ? '<span class="spinner" aria-hidden="true"></span>' : '<span class="step-dot" aria-hidden="true"></span>';
+    return `<li class="step ${state}">${icon}<span>${esc(s.label)}</span>${s.note ? `<span class="muted small">${esc(s.note)}</span>` : ''}</li>`;
+  }).join('');
+  const html = `<div class="loader card" role="status" aria-live="polite">
+    <div class="card-head"><h2>Loading from Metabase</h2><span class="pct num muted">0%</span></div>
+    <div class="bar" style="height:8px"><span style="width:0%;background:var(--ink)"></span></div>
+    <ol class="steps">${steps}</ol></div>`;
+  if (!ui.data) $('view').innerHTML = html;
+  $('progress').hidden = false;
+  const now = progress.steps[progress.current];
+  $('refresh').textContent = now ? `${now.short}…` : 'Loading…';
+}
+
+async function load(pull = true) {
+  if (ui.busy) return;
+  ui.busy = true; ui.msg = ''; renderChrome();
   try {
-    const res = await fetch('/api/state' + (refresh ? '?refresh=1' : ''));
+    let names = [];
+    if (pull) {
+      const r = await fetch('/api/sources');
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+      names = (await r.json()).sources;
+    }
+    progress.steps = [
+      ...names.map((s) => ({ key: s.name, label: `${s.label}`, short: s.label })),
+      { key: 'rules', label: 'Applying the rules', short: 'Applying rules' }
+    ];
+    for (let i = 0; i < names.length; i++) {
+      setStep(i);
+      const r = await fetch('/api/sources/' + names[i].name, { method: 'POST' });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || r.statusText);
+      progress.steps[i].note = body.status === 'ok' ? `${int(body.rows)} rows` : body.status === 'missing' ? 'not connected' : 'failed';
+    }
+    setStep(progress.steps.length - 1);
+    const res = await fetch('/api/state');
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
     ui.data = await res.json();
-    ui.msg = '';
   } catch (e) {
     ui.msg = 'Could not load data: ' + e.message;
   }
+  finishProgress();
   ui.busy = false;
   render();
 }
@@ -44,7 +110,7 @@ function renderChrome() {
   const tabs = [['room', 'Control room', ''], ['cover', 'Hero coverage', ''], ['tasks', 'Task log', open ? `${open} open` : ''], ['rules', 'Rules', '']];
   $('tabs').innerHTML = tabs.map(([k, l, b]) => `<button type="button" class="tab" role="tab" data-tab="${k}" aria-selected="${k === ui.tab}">${l}${b ? ' ' + chip('orange', b) : ''}</button>`).join('');
   $('refresh').disabled = ui.busy;
-  $('refresh').textContent = ui.busy ? 'Loading…' : 'Refresh from Metabase';
+  if (!ui.busy) $('refresh').textContent = 'Refresh from Metabase';
   $('freshness').textContent = d ? `Data ${new Date(d.meta.loadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
   const notices = [];
   if (ui.msg) notices.push(`<div class="notice notice-orange">${esc(ui.msg)}</div>`);
@@ -54,7 +120,7 @@ function renderChrome() {
       else if (s.status === 'missing') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
     }
     for (const n of d.notes) notices.push(`<div class="notice notice-amber">${esc(n)}</div>`);
-    if (d.meta.store === 'memory') notices.push('<div class="notice notice-amber">No DATABASE_URL: task ticks and the decision log are kept in memory and reset on restart.</div>');
+    if (d.meta.store === 'memory') notices.push('<div class="notice notice-amber">No persistent store: task ticks and the decision log are kept in memory and reset on restart.</div>');
   }
   $('notices').innerHTML = notices.join('');
 }
@@ -62,7 +128,10 @@ function renderChrome() {
 function render() {
   renderChrome();
   const d = ui.data;
-  if (!d) { $('view').innerHTML = `<p class="muted">${ui.msg ? '' : 'Loading…'}</p>`; return; }
+  if (!d) {
+    if (!ui.busy) $('view').innerHTML = `<div class="card"><p>Nothing loaded yet.</p><p><button type="button" class="btn btn-primary" id="retry">Try again</button></p></div>`;
+    return;
+  }
   const view = { room: viewRoom, cover: viewCover, tasks: viewTasks, rules: viewRules }[ui.tab] || viewRoom;
   $('view').innerHTML = `<div class="view">${view(d)}</div>`;
 }
@@ -205,7 +274,7 @@ function sourcesCard(d) {
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span></div>`).join('')}</div>
-    <p class="muted small">Metabase results are cached between refreshes; “Refresh from Metabase” re-runs the questions now. Storage: ${d.meta.store === 'postgres' ? 'Postgres' : 'in memory'}.</p>
+    <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
   </section>`;
 }
 
@@ -270,16 +339,16 @@ function viewRules(d) {
 
 // ---------- events ----------
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-cat],[data-tab],[data-live],#refresh,#resetRules');
+  const t = e.target.closest('[data-cat],[data-tab],[data-live],#refresh,#retry,#resetRules');
   if (!t) return;
   if (t.dataset.cat) { ui.cat = t.dataset.cat; remember(); render(); }
   else if (t.dataset.tab) { ui.tab = t.dataset.tab; remember(); render(); }
   else if (t.dataset.live) { ui.live = t.dataset.live; remember(); render(); }
-  else if (t.id === 'refresh') load(true);
+  else if (t.id === 'refresh' || t.id === 'retry') load(true);
   else if (t.id === 'resetRules') {
     if (!confirm('Reset every rule to its default?')) return;
     await fetch('/api/settings', { method: 'DELETE' });
-    load();
+    load(false);
   }
 });
 
@@ -307,7 +376,7 @@ document.addEventListener('submit', async (e) => {
   const res = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   ui.saving = false;
   if (!res.ok) ui.msg = 'Could not save rules.';
-  await load();
+  await load(false);
 });
 
 load();

@@ -42,7 +42,7 @@ function memoryStore() {
       const now = new Date().toISOString();
       for (const t of list) {
         const cur = tasks.get(t.id);
-        tasks.set(t.id, { ...t, created_at: cur?.created_at || now, last_seen: now, done_at: cur?.done_at || null });
+        tasks.set(t.id, { ...t, created_at: cur?.created_at || now, last_seen: now, done_at: cur?.done_at || null, auto: !!cur?.auto });
       }
     },
     async listTasks() { return [...tasks.values()]; },
@@ -137,6 +137,63 @@ function pgStore(url) {
   };
 }
 
+// Netlify Blobs: three small JSON documents (settings, tasks, decisions) plus a cache of the Metabase results.
+function blobsStore() {
+  let store;
+  const KEEP_DONE_MS = 14 * 24 * 3600 * 1000;
+  const read = async (key, fallback) => (await store.get(key, { type: 'json' })) ?? fallback;
+  const write = (key, value) => store.setJSON(key, value);
+  return {
+    kind: 'netlify-blobs',
+    async init() {
+      const { getStore } = await import('@netlify/blobs');
+      store = getStore({ name: 'khoj-control-room', consistency: 'strong' });
+    },
+    async getSettings() { return read('settings', {}); },
+    async saveSettings(obj) { await write('settings', { ...(await read('settings', {})), ...obj }); },
+    async upsertTasks(list) {
+      const tasks = await read('tasks', {});
+      const now = new Date().toISOString();
+      for (const t of list) {
+        const cur = tasks[t.id];
+        tasks[t.id] = { ...t, created_at: cur?.created_at || now, last_seen: now, done_at: cur?.done_at || null, auto: !!cur?.auto };
+      }
+      for (const [id, t] of Object.entries(tasks)) {
+        if (t.done_at && Date.now() - Date.parse(t.done_at) > KEEP_DONE_MS) delete tasks[id];
+      }
+      await write('tasks', tasks);
+    },
+    async listTasks() { return Object.values(await read('tasks', {})); },
+    async setTaskDone(id, done) {
+      const tasks = await read('tasks', {});
+      if (!tasks[id]) return false;
+      tasks[id].done_at = done ? new Date().toISOString() : null;
+      tasks[id].auto = false;
+      await write('tasks', tasks);
+      return true;
+    },
+    async autoClose(ids) {
+      if (!ids.length) return;
+      const tasks = await read('tasks', {});
+      const now = new Date().toISOString();
+      for (const id of ids) if (tasks[id] && !tasks[id].done_at) { tasks[id].done_at = now; tasks[id].auto = true; }
+      await write('tasks', tasks);
+    },
+    async recordDecisions(list) {
+      const decisions = await read('decisions', []);
+      const seen = new Set(decisions.map((d) => d.key));
+      const fresh = list.filter((d) => !seen.has(d.key)).map((d) => ({ ...d, at: new Date().toISOString() }));
+      if (!fresh.length) return;
+      await write('decisions', [...fresh, ...decisions].slice(0, 5000));
+    },
+    async listDecisions() { return (await read('decisions', [])).sort((a, b) => (a.at < b.at ? 1 : -1)); },
+    async getCache(key) { return read('cache:' + key, null); },
+    async setCache(key, value) { await write('cache:' + key, value); }
+  };
+}
+
+// Netlify Functions → Blobs; DATABASE_URL → Postgres; otherwise in memory.
 export function createStore() {
+  if (globalThis.Netlify || process.env.NETLIFY_BLOBS_CONTEXT || process.env.STORE === 'blobs') return blobsStore();
   return process.env.DATABASE_URL ? pgStore(process.env.DATABASE_URL) : memoryStore();
 }

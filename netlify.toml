@@ -1,0 +1,11 @@
+[build]
+  publish = "web"
+  command = "echo 'No build step: static front end + functions'"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  external_node_modules = ["pg-native"]
+
+[build.environment]
+  NODE_VERSION = "20"

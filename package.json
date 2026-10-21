@@ -2,7 +2,7 @@
   "name": "khoj-control-room",
   "version": "0.1.0",
   "private": true,
-  "description": "Khoj product testing control room: hero coverage, live trials, scale ladder, catalog signal and task log, driven by Metabase.",
+  "description": "Khoj product testing control room: hero coverage, trials, scale ladder, catalog signal and task log, driven by Metabase. Deploys to Netlify (functions + Blobs) or any Node host.",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -14,6 +14,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "@netlify/blobs": "^8.1.0",
     "pg": "^8.13.1"
   }
 }
