@@ -31,6 +31,9 @@ export const DEFAULT_SETTINGS = {
   catalogMinSpend: 1500,        // minimum spend on a product ID to read it
   catalogWindowDays: 14,
 
+  // Meta reporting correction: actual Spend/GMV = reported × this (Q16659 reads ~10% high)
+  metaSgmvFactor: 0.9,
+
   // Campaign naming
   testingMatch: 'testing',      // campaign name contains this = trial campaign
   scaleMatch: 'scale'           // campaign name contains this = scale campaign
@@ -58,6 +61,7 @@ export const SETTING_LABELS = {
   lifecycleDays: ['Ladder', 'Lifecycle ends after N days above the bar at the floor'],
   catalogMinSpend: ['Catalog', 'Minimum product spend to read (₹)'],
   catalogWindowDays: ['Catalog', 'Look-back window (days)'],
+  metaSgmvFactor: ['Data', 'Meta Spend/GMV correction: actual = reported × this'],
   testingMatch: ['Naming', 'Trial campaigns contain'],
   scaleMatch: ['Naming', 'Scale campaigns contain']
 };

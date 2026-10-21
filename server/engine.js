@@ -9,7 +9,17 @@ export function num(v) {
   const n = Number(String(v).replace(/[,₹%\s]/g, ''));
   return Number.isFinite(n) ? n : null;
 }
-const day = (v) => (v ? String(v).slice(0, 10) : null);
+// Accepts YYYY-MM-DD(…), D-M-YYYY / D/M/YYYY (Metabase exports), or anything Date can parse.
+export function day(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+const normName = (s) => String(s || '').replace(/\s*[–—-]\s*copy(\s*\d+)?\s*$/i, '').replace(/\s+/g, ' ').trim();
 const pct = (a, b) => (b > 0 ? (a / b) * 100 : null);
 const median = (xs) => {
   const s = xs.filter((x) => x !== null && Number.isFinite(x)).sort((a, b) => a - b);
@@ -39,6 +49,7 @@ function buildProducts(rows, s) {
   const products = [];
   const byId = new Map();
   const byCode = new Map();
+  const bySku = new Map();
   for (const r of rows) {
     const spend = num(r.l30d_spend) || 0;
     const orders = num(r.l30d_orders) || 0;
@@ -64,11 +75,13 @@ function buildProducts(rows, s) {
       hero: !!tier
     };
     if (!p.id) continue;
+    p.skus = String(r.khoj_cust_sku_ids || '').split(',').map((x) => x.trim()).filter(Boolean);
     products.push(p);
     byId.set(p.id, p);
     if (p.code) byCode.set(p.code, p);
+    for (const sku of p.skus) bySku.set(sku, p);
   }
-  return { products, byId, byCode };
+  return { products, byId, byCode, bySku };
 }
 
 function coverage(products) {
@@ -90,53 +103,99 @@ function coverage(products) {
 }
 
 // ---------- ads ----------
+// Meta "product id" = Khoj SKU id (khoj_cust_sku_ids). Also accepts product id/code, or a code inside the ad set name.
 function resolveProduct(r, idx) {
-  const id = r.product_id || r.khoj_product_id;
+  for (const k of ['sku_id', 'product_id', 'khoj_sku_id', 'retailer_id', 'content_id']) {
+    const v = r[k];
+    if (v && idx.bySku.has(String(v).trim())) return idx.bySku.get(String(v).trim());
+  }
+  const id = r.khoj_product_id || r.product_id;
   if (id && idx.byId.has(String(id))) return idx.byId.get(String(id));
   const code = r.product_code || r.khoj_product_code;
   if (code && idx.byCode.has(String(code))) return idx.byCode.get(String(code));
   const name = String(r.adset_name || '');
   for (const tok of name.split(/[\s|·,()\[\]/-]+/)) {
-    if (tok.length >= 6 && idx.byCode.has(tok)) return idx.byCode.get(tok);
-    if (tok.length >= 6 && idx.byId.has(tok)) return idx.byId.get(tok);
+    if (tok.length < 6) continue;
+    const p = idx.bySku.get(tok) || idx.byCode.get(tok) || idx.byId.get(tok);
+    if (p) return p;
   }
   return null;
 }
 
-function groupAdsets(rows, idx) {
+const METRICS = {
+  impressions: ['impressions'],
+  clicks: ['link_clicks', 'clicks'],
+  atc: ['add_to_cart', 'adds_to_cart', 'atc'],
+  purchases: ['purchases', 'orders']
+};
+const pick = (r, keys) => { for (const k of keys) if (k in r) return num(r[k]) ?? 0; return undefined; };
+
+// Groups ad-set-day rows. keyOf decides the unit: one ad set, or one product across original + "– Copy" ad sets.
+// The last day the account actually spent (ignores trailing days with near-zero spend, i.e. data lag).
+export function referenceDate(rows) {
+  const byDate = new Map();
+  for (const r of rows) { const d = day(r.date); if (d) byDate.set(d, (byDate.get(d) || 0) + (num(r.spend) || 0)); }
+  const dates = [...byDate.keys()].sort();
+  if (!dates.length) return { refDate: null, lastDate: null };
+  const med = median(dates.slice(-10).map((d) => byDate.get(d))) || 0;
+  let i = dates.length - 1;
+  while (i > 0 && byDate.get(dates[i]) < 0.2 * med) i--;
+  return { refDate: dates[i], lastDate: dates.at(-1) };
+}
+
+function groupAdsets(rows, idx, s, keyOf, refDate) {
   const map = new Map();
+  const maxDate = refDate || null;
+  const factor = s.metaSgmvFactor > 0 ? s.metaSgmvFactor : 1;
   for (const r of rows) {
-    const id = String(r.adset_id || r.adset_name || '');
-    if (!id) continue;
-    let g = map.get(id);
+    const adsetId = String(r.adset_id || r.adset_name || '');
+    if (!adsetId) continue;
+    const product = resolveProduct(r, idx);
+    const key = keyOf(r, product, adsetId);
+    let g = map.get(key);
     if (!g) {
-      g = { id, name: r.adset_name || id, campaign: r.campaign_name || '', product: resolveProduct(r, idx), days: [] };
-      map.set(id, g);
+      g = { id: key, name: normName(r.adset_name) || adsetId, campaign: normName(r.campaign_name), product, days: [], adsets: new Map(), has: {} };
+      map.set(key, g);
     }
-    if (!g.product) g.product = resolveProduct(r, idx);
-    g.days.push({
-      date: day(r.date),
-      status: r.adset_status || r.status || '',
-      budget: num(r.daily_budget),
-      spend: num(r.spend) || 0,
-      impressions: num(r.impressions) || 0,
-      clicks: num(r.link_clicks) ?? num(r.clicks) ?? 0,
-      atc: num(r.add_to_cart) ?? num(r.adds_to_cart) ?? 0,
-      purchases: num(r.purchases) ?? num(r.orders) ?? 0,
-      gmv: num(r.gmv) ?? num(r.purchase_value) ?? 0
-    });
+    if (!g.product && product) g.product = product;
+    const a = g.adsets.get(adsetId) || { id: adsetId, name: r.adset_name || adsetId, campaign: r.campaign_name || '', lastSpendDate: null, status: '' };
+    const date = day(r.date);
+    const spend = num(r.spend) || 0;
+    if (spend > 0 && (!a.lastSpendDate || date > a.lastSpendDate)) a.lastSpendDate = date;
+    if (r.adset_status || r.status) a.status = r.adset_status || r.status;
+    g.adsets.set(adsetId, a);
+    const d = { date, adsetId, budget: num(r.daily_budget), spend, gmv: (num(r.gmv) ?? num(r.purchase_value) ?? 0) / factor };
+    for (const [m, keys] of Object.entries(METRICS)) {
+      const v = pick(r, keys);
+      if (v !== undefined) { d[m] = v; g.has[m] = true; }
+    }
+    g.days.push(d);
   }
   for (const g of map.values()) {
-    g.days.sort((a, b) => (a.date < b.date ? -1 : 1));
+    // merge same-date rows from several ad sets (original + copies) into one day
+    const byDate = new Map();
+    for (const d of g.days) {
+      const cur = byDate.get(d.date);
+      if (!cur) { byDate.set(d.date, { ...d }); continue; }
+      for (const k of ['spend', 'gmv', ...Object.keys(METRICS)]) if (d[k] !== undefined) cur[k] = (cur[k] || 0) + d[k];
+      if (d.budget !== null) cur.budget = (cur.budget || 0) + d.budget;
+    }
+    g.days = [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
     const t = (k) => g.days.reduce((a, d) => a + (d[k] || 0), 0);
-    g.spend = t('spend'); g.impressions = t('impressions'); g.clicks = t('clicks');
-    g.atc = t('atc'); g.purchases = t('purchases'); g.gmv = t('gmv');
-    g.firstDate = g.days[0]?.date; g.lastDate = g.days.at(-1)?.date;
+    g.spend = t('spend'); g.gmv = t('gmv');
+    for (const m of Object.keys(METRICS)) g[m] = g.has[m] ? t(m) : null;
+    g.firstDate = g.days.find((d) => d.spend > 0)?.date || g.days[0]?.date;
+    g.lastDate = g.days.at(-1)?.date;
     g.dayCount = new Set(g.days.filter((d) => d.spend > 0).map((d) => d.date)).size;
-    const st = g.days.at(-1)?.status || '';
-    g.active = !st || /active|on|running|learning/i.test(st);
+    const recent = maxDate ? addDays(maxDate, -1) : null;
+    const adsets = [...g.adsets.values()];
+    for (const a of adsets) {
+      a.active = a.status ? /active|on|running|learning/i.test(a.status) : !!(a.lastSpendDate && recent && a.lastSpendDate >= recent);
+    }
+    g.activeAdsets = adsets.filter((a) => a.active);
+    g.active = g.activeAdsets.length > 0;
     g.sgmv = pct(g.spend, g.gmv);
-    g.ctr = pct(g.clicks, g.impressions);
+    g.ctr = g.has.clicks && g.has.impressions ? pct(g.clicks, g.impressions) : null;
     g.cat = g.product?.cat || TEST_CATEGORIES.find((c) => g.campaign.toLowerCase().includes(c.split(' ')[0].toLowerCase())) || 'Other';
   }
   return [...map.values()];
@@ -165,7 +224,8 @@ function decideTrial(t, s, ctx) {
     if (t.ctr !== null && t.ctr < s.minCtr) return { action: 'kill', reason: `CTR ${t.ctr.toFixed(2)}% < ${s.minCtr}% after ${inr(t.spend)}` };
     if (t.atc === 0) return { action: 'kill', reason: `No add-to-carts after ${inr(t.spend)}` };
   }
-  if (t.purchases === 0 && targetCpp && t.spend >= s.zeroOrderCppMultiple * targetCpp) {
+  const noOrders = t.purchases !== null ? t.purchases === 0 : t.gmv === 0;
+  if (noOrders && targetCpp && t.spend >= s.zeroOrderCppMultiple * targetCpp) {
     return { action: 'kill', reason: `0 orders after ${inr(t.spend)} (${s.zeroOrderCppMultiple}× target CPP = ${inr(s.zeroOrderCppMultiple * targetCpp)})` };
   }
   const limit = extended ? s.extendedVerdictSpend : s.verdictSpend;
@@ -187,7 +247,8 @@ function nearestStep(ladder, b) {
 function decideScale(a, s) {
   const L = s.ladder;
   const days = a.days.filter((d) => d.spend > 0 || d.budget);
-  const budgetOf = (d) => d.budget ?? d.spend;
+  // Without a daily_budget column, a day's spend is snapped to the nearest ladder step.
+  const budgetOf = (d) => d.budget ?? L[nearestStep(L, d.spend)];
   const cur = days.at(-1) ? budgetOf(days.at(-1)) : null;
   const curRun = [];
   for (let i = days.length - 1; i >= 0 && budgetOf(days[i]) === cur; i--) curRun.unshift(days[i]);
@@ -241,7 +302,7 @@ function buildCatalog(rows, idx, s, trialedIds) {
     if (!g) { g = { key, product: p, spend: 0, purchases: 0, gmv: 0, clicks: 0, impressions: 0 }; map.set(key, g); }
     g.spend += num(r.spend) || 0;
     g.purchases += num(r.purchases) ?? num(r.orders) ?? 0;
-    g.gmv += num(r.gmv) ?? num(r.purchase_value) ?? 0;
+    g.gmv += (num(r.gmv) ?? num(r.purchase_value) ?? 0) / (s.metaSgmvFactor > 0 ? s.metaSgmvFactor : 1);
     g.clicks += num(r.link_clicks) ?? 0;
     g.impressions += num(r.impressions) ?? 0;
   }
@@ -271,22 +332,38 @@ export function compute(src, s, history, today = todayIST()) {
 
   const extended = new Set(history.filter((d) => d.action === 'extend').map((d) => d.adset_id));
   const finalByAdset = new Map();
-  for (const d of [...history].reverse()) if (['kill', 'graduate'].includes(d.action)) finalByAdset.set(d.adset_id, d.action);
+  const finalReason = new Map();
+  for (const d of [...history].reverse()) if (['kill', 'graduate', 'stopped'].includes(d.action)) { finalByAdset.set(d.adset_id, d.action); finalReason.set(d.adset_id, d.reason); }
   const lifecycleProducts = new Set(history.filter((d) => d.action === 'lifecycle').map((d) => d.product_id));
 
   const tm = s.testingMatch.toLowerCase(), sm = s.scaleMatch.toLowerCase();
-  const adsets = groupAdsets(src.ads.rows, idx);
-  const trials = adsets.filter((a) => a.campaign.toLowerCase().includes(tm));
-  const scales = adsets.filter((a) => a.campaign.toLowerCase().includes(sm) && !a.campaign.toLowerCase().includes(tm));
-  const unmatched = adsets.filter((a) => !a.product && (trials.includes(a) || scales.includes(a)));
-  if (unmatched.length) notes.push(`${unmatched.length} trial/scale ad set(s) could not be matched to a Khoj product (add product_id to the ads question or put the product code in the ad set name).`);
+  const isTrial = (r) => String(r.campaign_name || '').toLowerCase().includes(tm);
+  const isScale = (r) => !isTrial(r) && String(r.campaign_name || '').toLowerCase().includes(sm);
+  // A trial is one product: its original ad set and any "– Copy" duplicates are summed together.
+  const { refDate, lastDate } = referenceDate(src.ads.rows);
+  if (refDate && lastDate && refDate < lastDate) notes.push(`Ad data after ${refDate} looks incomplete (almost no spend), so ad sets are judged as of ${refDate}.`);
+  const trials = groupAdsets(src.ads.rows.filter(isTrial), idx, s,
+    (r, p) => (p ? 'p:' + p.id : 'n:' + normName(r.adset_name).toLowerCase()), refDate);
+  const scales = groupAdsets(src.ads.rows.filter(isScale), idx, s, (_r, _p, adsetId) => 'a:' + adsetId, refDate);
+  const unmatched = [...trials, ...scales].filter((a) => !a.product);
+  if (unmatched.length) notes.push(`${unmatched.length} trial/scale ad set group(s) aren't linked to a Khoj product, so they count in trial decisions but not in hero coverage or Success% by source. Add the SKU id to the ads question (or to the ad set name) to link them.`);
 
   const ctx = { extended, catAov };
+  const closedNow = [];
   for (const t of trials) {
     const d = decideTrial(t, s, ctx);
     const prior = finalByAdset.get(t.id);
-    if (prior && !t.active) { t.decision = { action: prior === 'kill' ? 'killed' : 'graduated', reason: 'Closed' }; t.closed = true; }
-    else t.decision = d;
+    if (t.active) { t.decision = d; continue; }
+    t.closed = true;
+    if (prior) t.decision = { action: prior === 'graduate' ? 'graduated' : prior === 'stopped' ? 'stopped' : 'killed', reason: finalReason.get(t.id) || 'Closed' };
+    else if (d.action === 'kill' || d.action === 'graduate') {
+      t.decision = { action: d.action === 'kill' ? 'killed' : 'graduated', reason: d.reason + ' (ad sets already paused)' };
+      closedNow.push({ t, action: d.action, reason: t.decision.reason });
+    } else {
+      const sgTxt = t.sgmv === null ? 'no GMV' : 'Spend/GMV ' + p0(t.sgmv);
+      t.decision = { action: 'stopped', reason: `Paused at ${inr(t.spend)}, before the ${inr(t.extended ? s.extendedVerdictSpend : s.verdictSpend)} verdict (${sgTxt})` };
+      closedNow.push({ t, action: 'stopped', reason: t.decision.reason });
+    }
   }
   for (const a of scales) a.decision = decideScale(a, s);
 
@@ -301,7 +378,7 @@ export function compute(src, s, history, today = todayIST()) {
     const a = t.decision.action;
     if (a === 'continue' || a === 'extend') set(t.product.id, 'testing', 2);
     else if (a === 'graduate' || a === 'graduated') set(t.product.id, 'scaling', 4);
-    else if (a === 'kill' || a === 'killed') set(t.product.id, 'killed', 1);
+    else if (a === 'kill' || a === 'killed' || a === 'stopped') set(t.product.id, 'killed', 1);
   }
   for (const a of scales) {
     if (!a.product) continue;
@@ -329,26 +406,35 @@ export function compute(src, s, history, today = todayIST()) {
   const tasks = [];
   const decisions = [];
   const label = (t) => t.product?.title || t.name;
+  const where = (t) => {
+    const live = (t.activeAdsets && t.activeAdsets.length ? t.activeAdsets : [...(t.adsets?.values() || [])]);
+    const camps = [...new Set(live.map((a) => a.campaign))];
+    return `${live.length > 1 ? live.length + ' ad sets' : 'ad set'} “${t.name}” in ${camps.map((c) => `“${c}”`).join(' and ')}`;
+  };
+  const sku = (t) => (t.product?.skus?.length ? `SKU ${t.product.skus.join(', ')}` : 'the product');
+  for (const { t, action, reason } of closedNow) {
+    decisions.push({ adset_id: t.id, product_id: t.product?.id || null, product_name: label(t), category: t.cat, key: `${action === 'stopped' ? 'stopped' : action}:${t.id}`, action: action === 'stopped' ? 'stopped' : action, reason });
+  }
   for (const t of trials) {
+    if (t.firstDate) decisions.push({ adset_id: t.id, product_id: t.product?.id || null, product_name: label(t), category: t.cat, key: `start:${t.id}`, action: 'start', reason: `Trial started ${t.firstDate}` });
     if (t.closed) continue;
     const a = t.decision.action;
     const base = { adset_id: t.id, product_id: t.product?.id || null, product_name: label(t), category: t.cat };
     if (a === 'kill') {
       tasks.push({ id: `kill:${t.id}`, segment: 'kill', category: t.cat, due: today,
-        title: `Pause ad set “${t.name}”`, detail: `${label(t)}. ${t.decision.reason}. Add ${t.product?.code || 'the product'} to the Killed product set.` });
+        title: `Pause ${where(t)}`, detail: `${t.decision.reason}. Add ${sku(t)} to the Killed product set.` });
       decisions.push({ ...base, key: `kill:${t.id}`, action: 'kill', reason: t.decision.reason });
     } else if (a === 'graduate') {
       tasks.push({ id: `grad:${t.id}`, segment: 'scale', category: t.cat, due: today,
-        title: `Graduate ${label(t)} to Scale | ${t.cat}`, detail: `New ad set at ${inr(s.graduateBudget)}/day with the same post IDs. Add ${t.product?.code || 'the product'} to the Winners product set.` });
+        title: `Graduate ${label(t)} to Scale | ${t.cat}`, detail: `New ad set at ${inr(s.graduateBudget)}/day with the same post IDs. Add ${sku(t)} to the Winners product set.` });
       tasks.push({ id: `gradoff:${t.id}`, segment: 'scale', category: t.cat, due: addDays(today, s.overlapDays),
-        title: `Pause trial ad set “${t.name}”`, detail: `After ${s.overlapDays} days of overlap with the new scale ad set.` });
+        title: `Pause trial ${where(t)}`, detail: `After ${s.overlapDays} days of overlap with the new scale ad set.` });
       decisions.push({ ...base, key: `graduate:${t.id}`, action: 'graduate', reason: t.decision.reason });
     } else if (a === 'extend' || (a === 'continue' && t.extended)) {
       tasks.push({ id: `ext:${t.id}`, segment: 'scale', category: t.cat, due: today,
         title: `Extend ${label(t)} trial to ${inr(s.extendedVerdictSpend)}`, detail: `No change in Ads Manager: keep ${inr(s.trialDailyBudget)}/day. Next verdict at ${inr(s.extendedVerdictSpend)}.` });
       if (a === 'extend') decisions.push({ ...base, key: `extend:${t.id}`, action: 'extend', reason: t.decision.reason });
     }
-    if (t.product) decisions.push({ ...base, key: `start:${t.id}`, action: 'start', reason: `Trial started ${t.firstDate || ''}`.trim() });
   }
   for (const a of scales) {
     const d = a.decision;
@@ -365,6 +451,13 @@ export function compute(src, s, history, today = todayIST()) {
     }
   }
 
+  // Until ad sets carry a SKU id, skip queue products whose title contains every distinctive word of an unlinked trial's name,
+  // so a product already tested isn't suggested again.
+  const STOP = new Set(['creatives', 'creative', 'saree', 'sarees', 'kurti', 'kurtis', 'jewellery', 'trial', 'testing', 'scale', 'and', 'with', 'for', 'the', 'set']);
+  const words = (s) => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w));
+  const unlinkedSigs = trials.filter((t) => !t.product).map((t) => words(t.name)).filter((w) => w.length >= 2);
+  const looksTested = (p) => { const tw = new Set(words(p.title)); return unlinkedSigs.some((sig) => sig.every((w) => tw.has(w))); };
+
   // new trials to fill free slots
   const catalogHit = new Map(catalog.items.filter((c) => c.read === 'hit').map((c) => [c.productId, c]));
   const everTrialed = trials.length;
@@ -374,7 +467,7 @@ export function compute(src, s, history, today = todayIST()) {
   for (const c of TEST_CATEGORIES) {
     const running = trials.filter((t) => t.cat === c && !t.closed && ['continue', 'extend'].includes(t.decision.action)).length;
     const free = Math.max(0, s.slotsPerCategory - running);
-    const pool = products.filter((p) => p.cat === c && p.live && !trialedIds.has(p.id));
+    const pool = products.filter((p) => p.cat === c && p.live && !trialedIds.has(p.id) && !looksTested(p));
     const heroQ = pool.filter((p) => p.hero).map((p) => {
       const ch = catalogHit.get(p.id);
       return { p, source: ch ? 'catalog' : p.tier === 'A' ? 'tierA' : 'tierB', score: ch ? 3e9 - (ch.sgmv || 0) : p.tier === 'A' ? 2e9 + p.orders : 1e9 + (p.profit || 0) * 1000 + p.orders };
@@ -401,8 +494,10 @@ export function compute(src, s, history, today = todayIST()) {
   }
 
   // ---------- view models ----------
-  const trialRows = trials.filter((t) => !t.closed).map((t) => ({
+  const trialRows = trials.map((t) => ({
+    closed: !!t.closed, lastSpendDate: [...t.adsets.values()].map((a) => a.lastSpendDate).filter(Boolean).sort().at(-1) || null,
     id: t.id, name: t.name, product: t.product?.title || null, code: t.product?.code || null, cat: t.cat,
+    adsetCount: t.adsets.size, activeAdsetCount: t.activeAdsets.length, firstDate: t.firstDate,
     tier: t.product ? (t.product.hero ? t.product.tier : 'control') : null,
     days: t.dayCount, spend: t.spend, gmv: t.gmv, purchases: t.purchases, atc: t.atc, ctr: t.ctr, sgmv: t.sgmv,
     targetCpp: t.targetCpp, cpp: t.purchases ? t.spend / t.purchases : null,

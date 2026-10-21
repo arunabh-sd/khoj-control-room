@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compute } from '../server/engine.js';
-import { DEFAULT_SETTINGS as S } from '../server/rules.js';
+import { DEFAULT_SETTINGS } from '../server/rules.js';
+const S = { ...DEFAULT_SETTINGS, metaSgmvFactor: 1 };
 import { parseCsv } from '../server/csv.js';
 
 const product = (id, extra = {}) => ({
@@ -17,7 +18,7 @@ const day = (adset, spend, gmv, extra = {}) => ({
 const src = (products, ads = [], catalog = []) => ({
   products: { status: 'ok', rows: products }, ads: { status: 'ok', rows: ads }, catalog: { status: 'ok', rows: catalog }
 });
-const actionOf = (r, id) => r.trials.find((t) => t.id === id).action;
+const actionOf = (r, id) => r.trials.find((t) => t.id === 'p:' + id.replace('a', '')).action;
 
 test('hero rule: 300+ all, 30–299 needs profit > 0 and spend > 5000', () => {
   const r = compute(src([
@@ -42,7 +43,7 @@ test('trial verdicts at 7k: graduate ≤ 30%, extend ≤ 36%, kill above', () =>
 });
 
 test('extended trial waits for 14k, then graduates or kills', () => {
-  const history = [{ action: 'extend', adset_id: 'a1' }, { action: 'extend', adset_id: 'a2' }];
+  const history = [{ action: 'extend', adset_id: 'p:1' }, { action: 'extend', adset_id: 'p:2' }];
   const r1 = compute(src([product('1')], [day('a1', 9000, 9000 / 0.33)]), S, history);
   assert.equal(actionOf(r1, 'a1'), 'continue');
   const r2 = compute(src([product('1'), product('2')], [day('a1', 14000, 14000 / 0.29), day('a2', 14000, 14000 / 0.33)]), S, history);
@@ -73,4 +74,31 @@ test('free trial slots create new-trial tasks from live, untested hero products'
 test('csv parser handles quotes, commas and newlines', () => {
   const rows = parseCsv('a,b\n"1,000","say ""hi""\nthere"\n');
   assert.deepEqual(rows, [{ a: '1,000', b: 'say "hi"\nthere' }]);
+});
+
+test('Meta Spend/GMV correction: reported 40% is judged as 36%', () => {
+  const r = compute(src([product('1')], [day('a1', 7000, 7000 / 0.40)]), DEFAULT_SETTINGS, []);
+  const t = r.trials[0];
+  assert.equal(Math.round(t.sgmv), 36);
+  assert.equal(t.action, 'extend');
+});
+
+test('original and "– Copy" ad sets of one product are one trial', () => {
+  const rows = [
+    day('a1', 3000, 10000, { adset_name: 'Saree | X | Creatives', campaign_name: '[Testing] | Saree | ABO', product_id: '' }),
+    day('a2', 4000, 14000, { adset_name: 'Saree | X | Creatives', campaign_name: '[Testing] | Saree | ABO – Copy', product_id: '' })
+  ];
+  const r = compute(src([product('1')], rows), S, []);
+  assert.equal(r.trials.length, 1);
+  assert.equal(r.trials[0].spend, 7000);
+});
+
+test('paused trial before verdict is closed as stopped and frees the slot', () => {
+  const rows = [
+    day('a1', 3000, 3000, { date: '2026-10-10' }),
+    day('a2', 1000, 4000, { date: '2026-10-20' })
+  ].map((r) => ({ ...r, adset_status: undefined }));
+  const r = compute(src([product('1'), product('2'), product('3')], rows), S, []);
+  assert.equal(actionOf(r, 'a1'), 'stopped');
+  assert.equal(actionOf(r, 'a2'), 'continue');
 });

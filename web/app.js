@@ -17,7 +17,8 @@ const ACTION = {
   kill: ['orange', 'Kill'], graduate: ['green', 'Graduate'], extend: ['purple', 'Extend'], continue: ['blue', 'Continue'],
   killed: ['orange', 'Killed'], graduated: ['green', 'Graduated'],
   up: ['green', 'Step up'], down: ['orange', 'Step down'], hold: ['amber', 'Hold'], lifecycle: ['purple', 'Lifecycle ended'], paused: ['muted', 'Paused'],
-  start: ['blue', 'Trial started'], step_up: ['green', 'Step up'], step_down: ['orange', 'Step down']
+  start: ['blue', 'Trial started'], step_up: ['green', 'Step up'], step_down: ['orange', 'Step down'],
+  stopped: ['muted', 'Stopped early']
 };
 const actionChip = (a) => { const [c, t] = ACTION[a] || ['muted', a]; return chip(c, t); };
 
@@ -76,7 +77,7 @@ function viewRoom(d) {
   const p = decided ? win / decided : null;
   const ci = decided ? 1.96 * Math.sqrt(p * (1 - p) / decided) * 100 : null;
   const trials = d.trials.filter((t) => inCat(t.cat));
-  const running = trials.filter((t) => ['continue', 'extend'].includes(t.action));
+  const running = trials.filter((t) => !t.closed && ['continue', 'extend'].includes(t.action));
   const kpis = [
     ['Uploaded to Khoj', int(csum('uploaded')), `${int(csum('live'))} live`],
     ['Hero products', int(csum('hero')), `${int(csum('heroLive'))} hero and live`],
@@ -119,28 +120,30 @@ function pipelineCard(d, pipe, sum, csum) {
 }
 
 function liveCard(d, trials) {
+  const live = trials.filter((t) => !t.closed);
   const groups = { kill: ['kill'], graduate: ['graduate'], extend: ['extend'], continue: ['continue'] };
-  const count = (k) => trials.filter((t) => groups[k].includes(t.action)).length;
-  const filters = [['all', 'All', trials.length], ['kill', 'Kill', count('kill')], ['graduate', 'Graduate', count('graduate')], ['extend', 'Extend', count('extend')], ['continue', 'Continue', count('continue')]];
-  const shown = trials.filter((t) => ui.live === 'all' || groups[ui.live].includes(t.action)).sort((a, b) => b.spend - a.spend);
-  const color = { kill: 'var(--orange)', graduate: 'var(--green)', extend: 'var(--purple)', continue: 'var(--blue)' };
+  const count = (k) => live.filter((t) => groups[k].includes(t.action)).length;
+  const closedCount = trials.length - live.length;
+  const filters = [['all', 'All live', live.length], ['kill', 'Kill', count('kill')], ['graduate', 'Graduate', count('graduate')], ['extend', 'Extend', count('extend')], ['continue', 'Continue', count('continue')], ['closed', 'Closed', closedCount]];
+  const shown = (ui.live === 'closed' ? trials.filter((t) => t.closed) : live.filter((t) => ui.live === 'all' || (groups[ui.live] || []).includes(t.action))).sort((a, b) => b.spend - a.spend);
+  const color = { kill: 'var(--orange)', graduate: 'var(--green)', extend: 'var(--purple)', continue: 'var(--blue)', killed: 'var(--orange)', graduated: 'var(--green)', stopped: '#9A9CA3' };
   const bar = d.settings.winBar;
   const rows = shown.map((t) => `<tr>
-    <td><div class="prod"><span class="name">${esc(t.product || t.name)}</span><span class="muted small">${esc(t.cat)} · ${esc(t.code || t.name)}${t.tier ? ' · ' + (t.tier === 'control' ? 'control' : 'tier ' + t.tier) : ''}</span></div></td>
+    <td><div class="prod"><span class="name">${esc(t.product || t.name)}</span><span class="muted small">${esc(t.cat)}${t.code ? ' · ' + esc(t.code) : ' · not linked to a SKU'}${t.tier ? ' · ' + (t.tier === 'control' ? 'control' : 'tier ' + t.tier) : ''} · ${t.adsetCount > 1 ? t.adsetCount + ' ad sets' : '1 ad set'}${t.lastSpendDate ? ' · last spend ' + fmtDate(t.lastSpendDate) : ''}</span></div></td>
     <td class="num nowrap">D${t.days}</td>
     <td><div class="num small">${inr(t.spend)} / ${inr(t.limit)}</div><div class="bar" style="margin-top:5px"><span style="width:${Math.min(100, t.spend / t.limit * 100)}%;background:${color[t.action] || 'var(--blue)'}"></span></div></td>
-    <td class="r num">${t.purchases}</td>
+    <td class="r num">${int(t.purchases)}</td>
     <td class="r num">${inr(t.gmv)}</td>
     <td class="r"><div class="num ${t.sgmv === null ? 'muted' : t.sgmv > bar ? 'bad' : 'good'}">${t.sgmv === null ? 'no orders' : pc(t.sgmv)}</div><div class="num small muted nowrap">CPP ${inr(t.cpp)} · target ${inr(t.targetCpp)}</div></td>
     <td class="r num ${t.ctr !== null && t.ctr < d.settings.minCtr ? 'bad' : ''}">${pc(t.ctr, 2)}</td>
-    <td class="r num">${t.atc}</td>
+    <td class="r num">${int(t.atc)}</td>
     <td>${actionChip(t.action)}</td>
     <td class="wrap-cell small">${esc(t.reason)}</td></tr>`).join('');
   return `<section class="card" aria-label="Live trials">
-    <div class="card-head"><div><h2>Live trials</h2><span class="muted small">One product per ad set · verdict at ${inr(d.settings.verdictSpend)} · winning bar ${bar}% Spend/GMV</span></div>
+    <div class="card-head"><div><h2>Trials</h2><span class="muted small">One product per trial (original + copy ad sets summed) · verdict at ${inr(d.settings.verdictSpend)} · winning bar ${bar}% Spend/GMV after the ×${d.settings.metaSgmvFactor} Meta correction</span></div>
       <div class="seg-tabs" role="group" aria-label="Filter trials">${filters.map(([k, l, c]) => `<button type="button" class="seg" data-live="${k}" aria-pressed="${ui.live === k}">${l} <span class="count num">${c}</span></button>`).join('')}</div></div>
     ${shown.length ? `<div class="table-box"><table style="min-width:1200px"><thead><tr><th>Product</th><th>Day</th><th>Spend / verdict</th><th class="r">Orders</th><th class="r">GMV</th><th class="r">Spend/GMV</th><th class="r">CTR</th><th class="r">ATC</th><th>Decision</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>`
-      : `<p class="empty">${d.meta.sources.ads.status === 'ok' ? 'No live trials match this filter.' : 'Connect the ads question (MB_Q_ADS) to see trials.'}</p>`}
+      : `<p class="empty">${d.meta.sources.ads.status === 'ok' ? 'No trials match this filter.' : 'Connect the ads question (MB_Q_ADS) to see trials.'}</p>`}
   </section>`;
 }
 
