@@ -47,13 +47,20 @@ export function createApi(store) {
     const generated = new Set(result.tasks.map((t) => t.id));
     const healthy = SOURCE_NAMES.every((k) => sources[k].status !== 'error');
     if (healthy) {
-      const open = (await store.listTasks()).filter((t) => !t.done_at && !generated.has(t.id)).map((t) => t.id);
-      await store.autoClose(open);
+      // A task that's no longer generated either got done (the data shows the change) or was superseded
+      // (same trial, still running, new decision, e.g. a kill that became a graduate). Close the first, drop the second.
+      const active = new Set(result.activeTrialKeys || []);
+      const open = (await store.listTasks()).filter((t) => !t.done_at && !generated.has(t.id));
+      const trialKey = (id) => id.replace(/^(kill|grad|gradoff|ext):/, '');
+      const superseded = open.filter((t) => /^(kill|grad|ext):/.test(t.id) && active.has(trialKey(t.id))).map((t) => t.id);
+      const resolved = open.map((t) => t.id).filter((id) => !superseded.includes(id));
+      if (superseded.length && store.deleteTasks) await store.deleteTasks(superseded);
+      await store.autoClose(resolved);
     }
     const tasks = (await store.listTasks()).filter((t) => generated.has(t.id) || t.done_at);
     const log = (await store.listDecisions()).slice(0, 300);
 
-    const { decisions, ...view } = result;
+    const { decisions, activeTrialKeys, ...view } = result;
     return {
       meta: {
         loadedAt: sources.loadedAt,

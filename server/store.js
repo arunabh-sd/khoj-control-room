@@ -60,6 +60,7 @@ function memoryStore() {
         if (t && !t.done_at) { t.done_at = now; t.auto = true; }
       }
     },
+    async deleteTasks(ids) { for (const id of ids) tasks.delete(id); },
     async recordDecisions(list) {
       for (const d of list) {
         if (decisions.some((x) => x.key === d.key)) continue;
@@ -121,6 +122,9 @@ function pgStore(url) {
       if (!ids.length) return;
       await pool.query('update tasks set done_at = now(), auto = true where id = any($1) and done_at is null', [ids]);
     },
+    async deleteTasks(ids) {
+      if (ids.length) await pool.query('delete from tasks where id = any($1) and done_at is null', [ids]);
+    },
     async recordDecisions(list) {
       for (const d of list) {
         await pool.query(
@@ -177,6 +181,12 @@ function blobsStore() {
       const tasks = await read('tasks', {});
       const now = new Date().toISOString();
       for (const id of ids) if (tasks[id] && !tasks[id].done_at) { tasks[id].done_at = now; tasks[id].auto = true; }
+      await write('tasks', tasks);
+    },
+    async deleteTasks(ids) {
+      if (!ids.length) return;
+      const tasks = await read('tasks', {});
+      for (const id of ids) if (tasks[id] && !tasks[id].done_at) delete tasks[id];
       await write('tasks', tasks);
     },
     async recordDecisions(list) {

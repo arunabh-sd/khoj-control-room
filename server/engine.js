@@ -247,25 +247,44 @@ function groupAdsets(rows, idx, s, keyOf, refDate) {
   return [...map.values()];
 }
 
+// Spend/GMV over the most recent part of a trial: the latest days covering at least `verdictWindowShare` of spend
+// and at least `verdictWindowMin` rupees. Early days (learning, or a restart after duplicating an ad set) drop out.
+export function recentWindow(t, s) {
+  const need = Math.max(s.verdictWindowMin, t.spend * s.verdictWindowShare);
+  let spend = 0, gmv = 0, from = null;
+  for (let i = t.days.length - 1; i >= 0; i--) {
+    spend += t.days[i].spend; gmv += t.days[i].gmv; from = t.days[i].date;
+    if (spend >= need) break;
+  }
+  return { spend, gmv, from, sgmv: pct(spend, gmv), full: spend >= need && spend < t.spend };
+}
+
 function decideTrial(t, s, ctx) {
   const bar = s.winBar;
-  const sg = t.sgmv;
   const extended = ctx.extended.has(t.id);
   const aov = t.product?.aov || ctx.catAov[t.cat] || null;
   const targetCpp = aov ? (bar / 100) * aov : null;
   t.targetCpp = targetCpp;
   t.extended = extended;
+  const rec = recentWindow(t, s);
+  t.recent = rec;
+  // Verdicts use the recent window; the overall number is shown alongside.
+  const vs = rec.full ? rec.sgmv : t.sgmv;
+  const tag = (x) => (x === null ? 'no GMV' : p0(x));
+  const why = rec.full
+    ? `recent Spend/GMV ${tag(rec.sgmv)} on the last ${inr(rec.spend)} (overall ${tag(t.sgmv)})`
+    : `Spend/GMV ${tag(t.sgmv)}`;
+  if (t.spend >= s.verdictSpend) {
+    if (vs !== null && vs <= bar) return { action: 'graduate', reason: `${why}: ≤ ${bar}%` };
+    if (extended) {
+      if (t.spend >= s.extendedVerdictSpend) return { action: 'kill', reason: `${why}: still above ${bar}% at ${inr(s.extendedVerdictSpend)} after extension` };
+      return { action: 'continue', reason: `Extended. ${why}; graduates as soon as it is ≤ ${bar}%, verdict by ${inr(s.extendedVerdictSpend)}`, watch: true };
+    }
+    if (vs !== null && vs <= s.retestMax) return { action: 'extend', reason: `${why}: inside the ${bar}–${s.retestMax}% retest band` };
+    return { action: 'kill', reason: `${why}: above ${s.retestMax}% at ${inr(s.verdictSpend)}` };
+  }
+  const sg = t.sgmv;
   const sgTxt = sg === null ? 'no GMV' : 'Spend/GMV ' + p0(sg);
-  if (extended && t.spend >= s.extendedVerdictSpend) {
-    return sg !== null && sg <= bar
-      ? { action: 'graduate', reason: `${sgTxt} ≤ ${bar}% at ${inr(s.extendedVerdictSpend)} (after extension)` }
-      : { action: 'kill', reason: `${sgTxt} above ${bar}% at ${inr(s.extendedVerdictSpend)} (after extension)` };
-  }
-  if (!extended && t.spend >= s.verdictSpend) {
-    if (sg !== null && sg <= bar) return { action: 'graduate', reason: `${sgTxt} ≤ ${bar}% at ${inr(s.verdictSpend)}` };
-    if (sg !== null && sg <= s.retestMax) return { action: 'extend', reason: `${sgTxt} inside the ${bar}–${s.retestMax}% retest band at ${inr(s.verdictSpend)}` };
-    return { action: 'kill', reason: `${sgTxt} above ${s.retestMax}% at ${inr(s.verdictSpend)}` };
-  }
   if (t.spend >= s.earlyGateSpend) {
     if (t.ctr !== null && t.ctr < s.minCtr) return { action: 'kill', reason: `CTR ${t.ctr.toFixed(2)}% < ${s.minCtr}% after ${inr(t.spend)}` };
     if (t.atc === 0) return { action: 'kill', reason: `No add-to-carts after ${inr(t.spend)}` };
@@ -274,7 +293,7 @@ function decideTrial(t, s, ctx) {
   if (noOrders && targetCpp && t.spend >= s.zeroOrderCppMultiple * targetCpp) {
     return { action: 'kill', reason: `0 orders after ${inr(t.spend)} (${s.zeroOrderCppMultiple}× target CPP = ${inr(s.zeroOrderCppMultiple * targetCpp)})` };
   }
-  const limit = extended ? s.extendedVerdictSpend : s.verdictSpend;
+  const limit = s.verdictSpend;
   let reason;
   if (t.spend < s.earlyGateSpend) reason = `Too early: first gate at ${inr(s.earlyGateSpend)}`;
   else if (sg === null) reason = `No orders yet; verdict at ${inr(limit)}`;
@@ -574,6 +593,7 @@ export function compute(src, s, history, today = todayIST()) {
     adsetCount: t.adsets.size, activeAdsetCount: t.activeAdsets.length, firstDate: t.firstDate,
     tier: t.product ? (t.product.hero ? t.product.tier : 'control') : null,
     days: t.dayCount, spend: t.spend, gmv: t.gmv, purchases: t.purchases, atc: t.atc, ctr: t.ctr, sgmv: t.sgmv,
+    recentSgmv: t.recent?.full ? t.recent.sgmv : null, recentSpend: t.recent?.full ? t.recent.spend : null, recentFrom: t.recent?.full ? t.recent.from : null,
     targetCpp: t.targetCpp, cpp: t.purchases ? t.spend / t.purchases : null,
     limit: t.extended ? s.extendedVerdictSpend : s.verdictSpend, extended: t.extended,
     action: t.decision.action, reason: t.decision.reason, watch: !!t.decision.watch, active: t.active
@@ -587,6 +607,7 @@ export function compute(src, s, history, today = todayIST()) {
 
   return {
     today, catAov, notes,
+    activeTrialKeys: trials.filter((t) => t.active).map((t) => t.id),
     coverage: coverage(products),
     pipeline, bySource, queue,
     trials: trialRows, ladder: ladderRows,

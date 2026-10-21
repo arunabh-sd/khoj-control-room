@@ -84,7 +84,7 @@ One row **per product ID per day** from catalog campaigns (Ads Manager breakdown
 | Hero | L30D seller orders ≥ 300: all. 30–299: profit % (D40–D10) > 0 and L30D spend > ₹5,000 |
 | Test categories | Saree; Kurti & Suits (kurta sets, kurtas, maternity kurtis, salwar suits, dress material); Jewellery (women's) |
 | Early kill | At ₹1,500: CTR < 0.8% or zero add-to-carts. Zero orders after 3 × target CPP (target CPP = 30% × product AOV) |
-| Verdict at ₹7,000 | Spend/GMV ≤ 30% → graduate; 30–36% → extend once to ₹14,000; above 36% → kill |
+| Verdict at ₹7,000 | Judged on the **most recent half of spend** (at least ₹3,500), so a slow learning start or a restart after duplicating doesn't sink a product. Recent Spend/GMV ≤ 30% → graduate; 30–36% → extend (graduates as soon as recent ≤ 30%, verdict by ₹14,000); above 36% → kill. Overall Spend/GMV is shown alongside. |
 | Ladder | ₹1,000 → 1,500 → 2,250 → 3,400 → 5,000/day. After 3 days at a step: marginal Spend/GMV < 25% step up; 25–30% hold; > 30% step down (ceiling recorded) |
 | Lifecycle | 14 days above 30% Spend/GMV at the floor budget → lifecycle ended |
 | New trials | 4 live trials per test category; free slots refilled from live untested hero products: catalog hits first, then 300+ order products, then 30–299; about 15% go to control products |

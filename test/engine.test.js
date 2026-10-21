@@ -123,3 +123,23 @@ test('ad set → product map: trusts ≥50% share or a title match, and links co
   assert.equal(by('Magenta').product, 'Magenta Shraddha Narayanpet Cotton'); // low share, title matches
   assert.equal(by('Royal Blue').product, null);        // low share, no title match → not trusted
 });
+
+test('verdict uses the recent half of spend: a slow start does not kill a product that recovered', () => {
+  const d = (date, spend, gmv) => day('a1', spend, gmv, { date });
+  const rows = [
+    d('2026-10-04', 1500, 1500 / 1.5), d('2026-10-05', 1500, 1500 / 1.5),     // learning: 150%
+    d('2026-10-15', 2000, 2000 / 0.24), d('2026-10-16', 2000, 2000 / 0.24)    // settled: 24%
+  ];
+  const r = compute(src([product('1')], rows), S, []);
+  const t = r.trials[0];
+  assert.ok(t.sgmv > 36);                 // overall would have killed it
+  assert.equal(Math.round(t.recentSgmv), 24);
+  assert.equal(t.action, 'graduate');
+});
+
+test('verdict window kills a product whose recent half is still bad', () => {
+  const d = (date, spend, gmv) => day('a1', spend, gmv, { date });
+  const rows = [d('2026-10-04', 3500, 3500 / 0.25), d('2026-10-15', 3500, 3500 / 0.45)];
+  const r = compute(src([product('1')], rows), S, []);
+  assert.equal(r.trials[0].action, 'kill');
+});

@@ -11,6 +11,8 @@ export const DEFAULT_SETTINGS = {
   winBar: 30,                   // Spend/GMV % at or below this = winner
   retestMax: 36,                // Spend/GMV % above winBar and at or below this at the first verdict = extend once
   verdictSpend: 7000,           // first verdict
+  verdictWindowShare: 0.5,      // verdicts use the most recent share of spend (early learning drops out)...
+  verdictWindowMin: 3500,       // ...covering at least this many rupees
   extendedVerdictSpend: 14000,  // verdict after one extension
   earlyGateSpend: 1500,         // first kill gate
   minCtr: 0.8,                  // % link CTR at the early gate
@@ -47,6 +49,8 @@ export const SETTING_LABELS = {
   winBar: ['Trial', 'Winning bar: Spend/GMV % at or below'],
   retestMax: ['Trial', 'Retest band upper limit: Spend/GMV %'],
   verdictSpend: ['Trial', 'First verdict at spend (₹)'],
+  verdictWindowShare: ['Trial', 'Verdict window: most recent share of spend (0.5 = last half)'],
+  verdictWindowMin: ['Trial', 'Verdict window: at least this much recent spend (₹)'],
   extendedVerdictSpend: ['Trial', 'Verdict after extension (₹)'],
   earlyGateSpend: ['Trial', 'Early kill gate at spend (₹)'],
   minCtr: ['Trial', 'Minimum link CTR % at the early gate'],
