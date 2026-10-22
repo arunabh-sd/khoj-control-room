@@ -25,6 +25,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_UNIVERSE_PARAMS` | `min_pq=3` (passed to the question's filters) |
 | `MB_Q_PRODUCT_SPEND` | `16674` (product-wise spend, all campaigns) |
 | `MB_Q_OVERLAP` | `16494` (Khoj × parent seller buyer overlap) |
+| `MB_Q_CUSTOMER_HISTORY` | `16717` (Khoj buyers' ShopDeck order history, 12 months) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
 3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
@@ -96,6 +97,21 @@ seller_product_pq >= 3 AND (l30d_orders >= 300 OR (l30d_orders >= 30 AND l30d_sp
 ### Buyer overlap (`MB_Q_OVERLAP`: Q16494)
 
 Khoj buyers who also bought from the product's parent seller: `seller_id, product_id, khoj_buyers, overlapping_buyers` (`product_id` = seller product id, mapped to Khoj through the universe question). Feeds Audience intelligence → Cannibalisation and the overlap tag on live trials.
+
+### Khoj buyers' order history (`MB_Q_CUSTOMER_HISTORY`: Q16717)
+
+Every ShopDeck order in the last 12 months by anyone who has ordered on Khoj, Khoj's own orders included (Khoj's seller id is under Rules → Customers). Feeds Audience intelligence, Repeat behaviour and Cross-selling.
+
+Columns used: `order_id, customer_id, seller_id, customer_product_short_id, createdat, delivery_time, selling_price, quantity, payment_mode, in_house_status, seller_last_status, pincode, meta` (`first_order` in `meta` = the customer's first ever ShopDeck order). Add `category_l2, category_l3, category_l4` to cover every history line's category (otherwise the universe question supplies it where it can). On load the rows are cut to these columns; names, addresses, coordinates, AWBs and labels are dropped and never cached.
+
+**Trim the question to these columns.** Today it returns ~90 columns (12 MB for 10k rows), which is slow for a 10-second Netlify function and grows with Khoj.
+
+- A Khoj order = an order on Khoj's seller id; cancelled orders are left out; RTO is of delivered + returned.
+- A visit = a buyer's orders within 30 minutes (buy-now places one order per item); a repeat is a Khoj order after that.
+- Repeat windows count only buyers whose first Khoj order is at least that old.
+- Seller-site benchmark: the same customers from their first seller order in the 12 months, back to the same seller (Khoj excluded).
+- Khoj vs site price: Khoj unit price ÷ the median unit price these customers paid for the same product on the parent seller's site (product mapped through the universe question).
+- State comes from the pincode's first three digits.
 
 ### Meta product breakdown (CSV upload)
 

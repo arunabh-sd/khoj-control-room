@@ -1,5 +1,6 @@
 // The rules engine: turns source rows + settings + decision history into every view and task.
 import { TEST_CATEGORIES, categoryOf } from './categories.js';
+import { analyseHistory } from './history.js';
 
 const CATS_ALL = [...TEST_CATEGORIES, 'Other'];
 
@@ -832,8 +833,20 @@ export function compute(src, s, history, today = todayIST()) {
     };
   }
 
+  // ---------- Khoj buyers' ShopDeck order history (Q16717): audience, repeat, cross-selling ----------
+  let customers = null;
+  if (src.history?.rows?.length) {
+    const khojToSellerProduct = new Map(), sellerProductCat = new Map();
+    for (const r of uRows) {
+      if (r.khoj_product_id && r.seller_product_id) khojToSellerProduct.set(String(r.khoj_product_id), String(r.seller_product_id));
+      if (r.seller_product_id && r.category_l4) sellerProductCat.set(String(r.seller_product_id), { l4: r.category_l4, cat: categoryOf(r) });
+    }
+    customers = analyseHistory(src.history.rows, { khojSellerId: s.khojSellerId, sessionMinutes: s.sessionMinutes, idx, khojToSellerProduct, sellerProductCat, productUrl: (p) => productUrl(p, s.khojBaseUrl) });
+    if (customers?.error) notes.push(customers.error);
+  }
+
   return {
-    today, catAov, notes, kpis, killReview, overlap,
+    today, catAov, notes, kpis, killReview, overlap, customers,
     universe: hasUniverse ? { byCat: universe, hasAll: true, hasStatus: uHasStatus, origin: src.universe.origin } : null,
     metaSignal: {
       window: { from: metaSignal.from, to: metaSignal.to },

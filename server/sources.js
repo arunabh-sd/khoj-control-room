@@ -5,6 +5,7 @@ import path from 'node:path';
 import { parseCsv } from './csv.js';
 import { runCard, normRow } from './metabase.js';
 import { compactUniverse } from './universe.js';
+import { compactHistory } from './history.js';
 
 const SOURCES = {
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products' },
@@ -12,6 +13,7 @@ const SOURCES = {
   catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
   adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' },
   overlap: { env: 'MB_Q_OVERLAP', file: 'overlap.csv', label: 'Khoj × parent seller buyer overlap' },
+  history: { env: 'MB_Q_CUSTOMER_HISTORY', file: 'history.csv', label: 'Khoj buyers\' ShopDeck order history (12 months)', compact: compactHistory },
   universe: { env: 'MB_Q_UNIVERSE', params: 'MB_Q_UNIVERSE_PARAMS', file: 'universe.csv', label: 'ShopDeck universe (PQ ≥ 3)',
     compact: (rows) => compactUniverse(rows, { minPq: Number(process.env.UNIVERSE_MIN_PQ ?? 3) }) }
 };

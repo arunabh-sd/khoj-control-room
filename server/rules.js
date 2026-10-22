@@ -39,6 +39,10 @@ export const DEFAULT_SETTINGS = {
   // Not applied to the product-wise spend question, whose Spend/GMV is accurate.
   metaSgmvFactor: 0.9,
 
+  // Customers (order history question)
+  khojSellerId: '6aad1869bcb80ce92eb3389b',   // Khoj by ShopDeck's seller id: its orders are Khoj orders
+  sessionMinutes: 30,           // orders this close together are one visit (buy-now makes one order per item)
+
   // Campaign naming
   khojBaseUrl: 'https://khoj.shopdeck.com',
   testingMatch: 'testing',      // campaign name contains this = trial campaign
@@ -72,6 +76,8 @@ export const SETTING_LABELS = {
   signalWindowShare: ['Product signal', 'Performance window: most recent share of spend (0.5 = last half)'],
   signalWindowMin: ['Product signal', 'Performance window: at least this much recent spend (₹)'],
   metaSgmvFactor: ['Data', 'Ads question Spend/GMV correction: actual = reported × this'],
+  khojSellerId: ['Customers', 'Khoj seller id (its orders are Khoj orders)'],
+  sessionMinutes: ['Customers', 'Orders within this many minutes are one visit'],
   khojBaseUrl: ['Naming', 'Khoj site for product links'],
   testingMatch: ['Naming', 'Trial campaigns contain'],
   scaleMatch: ['Naming', 'Scale campaigns contain']

@@ -244,3 +244,35 @@ test('cannibalisation: seller product ids map to Khoj products through the unive
   assert.equal(r.overlap.byCat.find((c) => c.key === 'Saree').pct, 40);
   assert.equal(r.overlap.topSeller.id, 'B');
 });
+
+test('order history: new-to-ShopDeck, parent seller before/after, repeat windows and Khoj vs site price', async () => {
+  const { compactHistory, parseTs, stateOfPincode } = await import('../server/history.js');
+  assert.equal(parseTs('8-8-2026, 12:54'), parseTs('2026-08-08T12:54:00+05:30'));
+  assert.equal(stateOfPincode('560049'), 'Karnataka');
+  const K = 'khoj';
+  const line = (c, s, p, when, extra = {}) => ({ order_id: `${c}-${s}-${when}`, customer_id: c, seller_id: s, customer_product_short_id: p, createdat: when,
+    selling_price: '1000', quantity: '1', payment_mode: 'cod', in_house_status: 'delivered', seller_last_status: 'delivered', pincode: '560049', meta: 'web', ...extra });
+  const hist = compactHistory([
+    line('c1', 'sellerA', 'spA', '1-9-2026, 10:00'),                                         // c1 bought the product on the seller site before
+    line('c1', K, '1', '1-10-2026, 10:00', { selling_price: '500' }),                         // first Khoj order, half price
+    line('c1', K, '9', '5-10-2026, 10:00', { selling_price: '300' }),                         // came back within 7 days
+    line('c2', K, '1', '2-10-2026, 10:00', { selling_price: '500', meta: 'web,first_order' }), // new to ShopDeck
+    line('c2', 'sellerZ', 'spZ', '3-10-2026, 10:00'),                                         // then another ShopDeck seller
+    line('c3', K, '1', '20-10-2026, 10:00', { seller_last_status: 'cancel_initiated' })         // cancelled only: not a buyer
+  ]);
+  const prods = [product('1', { seller_id: 'sellerA' }), product('9', { seller_id: 'sellerB', khoj_category_l4: 'kurtas' })];
+  const s = src(prods);
+  s.history = { status: 'ok', rows: hist };
+  s.universe = { status: 'ok', rows: [{ category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees', n: 1, uploaded: 1, live: 1, l30d_orders: 400, l30d_spend: 1, profit_pct_d40_d10: 1, khoj_product_id: '1', seller_product_id: 'spA', pq: 5 }] };
+  const r = compute(s, { ...S, khojSellerId: K }, [], '2026-10-22').customers;
+  assert.equal(r.audience.buyers, 2);
+  assert.equal(r.audience.newToSdPct, 50);
+  assert.equal(r.audience.parent.beforePct, 50);
+  assert.equal(r.audience.parent.beforeProductPct, 50);
+  assert.equal(r.audience.parent.afterAnyPct, 50);
+  assert.equal(r.audience.price.weightedRatio, 50);
+  const w7 = r.repeat.curves.find((c) => c.days === 7);
+  assert.equal(w7.khoj.eligible, 2);
+  assert.equal(w7.khoj.pct, 50);
+  assert.equal(r.repeat.kinds.otherParent, 1);
+});

@@ -154,3 +154,5 @@ code { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; b
   .funnel-num { flex-direction: row; justify-content: space-between; }
 }
 .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; align-items: start; }
+@media (max-width: 520px) { .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); } }
