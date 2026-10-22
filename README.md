@@ -26,8 +26,8 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_PRODUCT_SPEND` | `16674` (product-wise spend, all campaigns) |
 | `MB_Q_OVERLAP` | `16494` (Khoj × parent seller buyer overlap) |
 | `MB_Q_CUSTOMER_HISTORY` | `16717` (Khoj buyers' ShopDeck order history, 12 months) |
-| `MB_Q_EVENTS` | site sessions question (`sql/site_sessions.sql`) |
-| `MB_Q_BENCHMARK` | repeat benchmark question (`sql/repeat_benchmark.sql`) |
+| `MB_Q_EVENTS` | `16724` (site sessions, `sql/site_sessions.sql`) |
+| `MB_Q_BENCHMARK` | `16725` (repeat benchmark, `sql/repeat_benchmark.sql`) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
 3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
@@ -35,7 +35,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 **When Metabase is called:**
 - Ads, ad set map and product-wise spend: when the page opens and when you click "Refresh from Metabase".
 - Products (Q16450): **every 3 hours** (its seller L30D numbers take Metabase more than the page's 10 seconds).
-- Universe (Q16457), order history (Q16717) and buyer overlap (Q16494): **once a day**, by the scheduled function `netlify/functions/daily.mjs`. It runs hourly but only calls Metabase for a question not yet pulled in its window (IST), with a 25-second limit (`MB_DAILY_TIMEOUT_MS`) and at most 3 tries a day. Page loads use the last daily pull. Until the first one exists the page tries once an hour itself, under the 10-second limit. Scheduled functions run on the published production deploy only. Each question runs as its own request, with a progress bar per step. Ticking tasks and saving rules reuse the last pull and never query Metabase.
+- Universe (Q16457), order history (Q16717) and buyer overlap (Q16494): **once a day**, by the scheduled function `netlify/functions/daily.mjs`. It checks every 5 minutes but only calls Metabase for a question not yet pulled in its window (IST), with a 25-second limit (`MB_DAILY_TIMEOUT_MS`) and at most 3 tries a day. Page loads use the last daily pull. The first check after a deploy pulls every scheduled question once. Scheduled functions run on the published production deploy only. Each question runs as its own request, with a progress bar per step. Ticking tasks and saving rules reuse the last pull and never query Metabase.
 
 **Limits to know:**
 - Netlify functions time out at 10 seconds by default (26 s on paid plans, set per site under Functions). Each Metabase question has to return within that. If Q16450 gets slow, trim its columns or add a filter.
@@ -165,7 +165,7 @@ WHERE o.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
 
 ### Khoj vs the parent sellers' own sites (`MB_Q_EVENTS`, `MB_Q_BENCHMARK`)
 
-`sql/site_sessions.sql` (last 28 days of product page opens, buy-now clicks, checkouts and orders) and `sql/repeat_benchmark.sql` (each seller site's own 7/14/28-day repeat) are asked about Khoj plus the **parent sellers** of the products Khoj has sold. Both need a Metabase variable `parent_sellers` of type Text, not required. The dashboard fills it from the order history and products questions, so these two run at half past the hour (`netlify/functions/daily-sellers.mjs`), once a day.
+`sql/site_sessions.sql` (last 28 days of product page opens, buy-now clicks, checkouts and orders) and `sql/repeat_benchmark.sql` (each seller site's own 7/14/28-day repeat) are asked about Khoj plus the **parent sellers** of the products Khoj has sold. Both need a Metabase variable `parent_sellers` of type Text, not required. The dashboard fills it from the order history and products questions, so these two run from `netlify/functions/daily-sellers.mjs` (checked every 5 minutes, 2 minutes after the others), once a day.
 
 Each parent seller counts in the comparison in proportion to the Khoj orders of its products, so the benchmark is "what these products' own storefronts do". Sellers with under 100 sessions (events) or 20 customers in a window (repeat) are left out; the page shows how much of Khoj's orders the benchmark covers.
 

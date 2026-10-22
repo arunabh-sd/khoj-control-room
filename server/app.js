@@ -76,12 +76,12 @@ export function createApi(store) {
     const cur = await getSource(name);
     if (cur.status === 'ok') return { ...cur, daily: true };
     const attempt = await getKV('attempt:' + name);
-    if (attempt && Date.now() - new Date(attempt.at).getTime() < 3600_000) return { ...cur, daily: true, error: cur.error || 'Waiting for the daily pull (runs every hour until it succeeds)' };
+    if (attempt && Date.now() - new Date(attempt.at).getTime() < 3600_000) return { ...cur, daily: true, error: cur.error || 'Waiting for the scheduled pull (checks every 5 minutes)' };
     await setKV('attempt:' + name, { at: new Date().toISOString() });
     return { ...(await refreshSource(name)), daily: true };
   }
 
-  // Scheduled (hourly): pulls each scheduled source once per period (IST day, or every N hours), with a longer
+  // Scheduled (every 5 minutes): pulls each scheduled source once per period (IST day, or every N hours), with a longer
   // timeout. A failed pull is retried next hour, at most 3 tries per period.
   const periodOf = (name, iso) => {
     const h = EVERY_HOURS[name] || 24;
@@ -90,7 +90,7 @@ export function createApi(store) {
   };
   // Bump when a deploy changes what the scheduled questions need (columns, compaction): the next scheduled run then
   // pulls every scheduled question once, whatever was pulled earlier that day.
-  const SCHEDULE_VERSION = '2026-10-22.3';
+  const SCHEDULE_VERSION = '2026-10-22.4';
   async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false, phase = 1 } = {}) {
     const now = new Date().toISOString();
     if (!force && (await getKV('schedule-version:' + phase)) !== SCHEDULE_VERSION) {

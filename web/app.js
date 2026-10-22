@@ -132,10 +132,10 @@ function renderChrome() {
   if (ui.note) notices.push(`<div class="notice notice-green">${esc(ui.note)}</div>`);
   if (d) {
     for (const [k, s] of Object.entries(d.meta.sources)) {
-      if (s.status === 'error' && s.daily) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: not pulled yet. The scheduled pull runs on the hour (last try: ${esc(s.error)}).</div>`);
+      if (s.status === 'error' && s.daily) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: not pulled yet. The scheduled pull checks every 5 minutes (last try: ${esc(s.error)}).</div>`);
       else if (s.status === 'error') notices.push(`<div class="notice notice-orange"><strong>${esc(k)}</strong> source failed (${esc(s.origin)}): ${esc(s.error)}</div>`);
-      else if (s.stale) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> didn't refresh (${esc(s.error)}). Showing the pull from ${esc(fmtWhen(s.loadedAt))}${s.daily ? '; the scheduled pull retries on the hour' : ''}.</div>`);
-      else if (s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: waiting for the scheduled pull, which runs on the hour.</div>`);
+      else if (s.stale) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> didn't refresh (${esc(s.error)}). Showing the pull from ${esc(fmtWhen(s.loadedAt))}${s.daily ? '; the scheduled pull retries within 5 minutes' : ''}.</div>`);
+      else if (s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: waiting for the scheduled pull, which checks every 5 minutes.</div>`);
       else if (s.status === 'missing' && !['universe', 'overlap', 'history', 'events', 'benchmark'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
     }
     for (const n of d.notes) notices.push(`<div class="notice notice-amber">${esc(n)}</div>`);
