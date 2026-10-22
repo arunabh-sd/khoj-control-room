@@ -13,14 +13,27 @@ export function normRow(row) {
 
 // Uses the export endpoint (no 2,000-row cap) with format_rows=false, so numbers arrive raw
 // (12000, not "12,000", "₹12k" or "1.2K") and column keys are the question's column names.
-export async function runCard(cardId) {
+// "min_pq=3&min_orders=" → Metabase parameters for the question's SQL variables (empty values are skipped).
+export function parseParams(str) {
+  const out = [];
+  for (const part of String(str || '').split(/[&,]/)) {
+    const [k, ...rest] = part.split('=');
+    const v = rest.join('=').trim();
+    if (!k || !k.trim() || v === '') continue;
+    const n = Number(v);
+    out.push({ type: 'category', target: ['variable', ['template-tag', k.trim()]], value: Number.isFinite(n) && v !== '' ? n : v });
+  }
+  return out;
+}
+
+export async function runCard(cardId, paramStr = '') {
   const base = (process.env.METABASE_URL || '').replace(/\/+$/, '');
   const key = process.env.METABASE_API_KEY;
   if (!base || !key) throw new Error('METABASE_URL and METABASE_API_KEY must be set');
   const res = await fetch(`${base}/api/card/${encodeURIComponent(cardId)}/query/json`, {
     method: 'POST',
     headers: { 'x-api-key': key, 'content-type': 'application/json' },
-    body: JSON.stringify({ format_rows: false, pivot_results: false, parameters: [] })
+    body: JSON.stringify({ format_rows: false, pivot_results: false, parameters: parseParams(paramStr) })
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');

@@ -694,30 +694,39 @@ export function compute(src, s, history, today = todayIST()) {
     };
   }).sort((a, b) => String(a.stoppedOn).localeCompare(String(b.stoppedOn)));
 
-  // ---------- ShopDeck universe (optional source): all products and hero products on ShopDeck, by category ----------
+  // ---------- ShopDeck universe (optional source, e.g. Q16457: all ShopDeck products with PQ ≥ 3) ----------
+  // Rows are either one per product (raw or compacted, with `n`) or counts the question already aggregated.
   const uRows = src.universe?.rows || [];
   const universe = {};
-  for (const c of CATS_ALL) universe[c] = { all: 0, hero: 0 };
-  let uHasAll = false;
+  for (const c of CATS_ALL) universe[c] = { all: 0, uploaded: 0, live: 0, hero: 0, heroUploaded: 0, heroLive: 0 };
+  let uHasStatus = false;
+  const isHeroRow = (r) => {
+    const flag = String(r.is_hero ?? '').toLowerCase();
+    if (r.is_hero !== undefined && r.is_hero !== null && flag !== '') return ['1', 'true', 'yes', 'y'].includes(flag);
+    if (r.l30d_orders === undefined) return false;
+    const o = num(r.l30d_orders) || 0, pr = num(r.profit_pct_d40_d10), sp = num(r.l30d_spend) || 0;
+    return o >= s.heroOrdersAll || (o >= s.heroOrdersMin && pr !== null && pr > s.heroMinProfitPct && sp > s.heroMinSpend);
+  };
   for (const r of uRows) {
+    if (String(r.seller_id || '').toUpperCase() === 'TOTAL') continue;
     const c = categoryOf(r);
-    const allN = num(r.sd_products) ?? num(r.products) ?? num(r.total_products);
-    const heroN = num(r.sd_hero_products) ?? num(r.hero_products);
-    if (allN !== null || heroN !== null) {
-      if (allN !== null) { universe[c].all += allN; uHasAll = true; }
-      if (heroN !== null) universe[c].hero += heroN;
+    const U = universe[c];
+    if ('sd_products' in r || 'sd_hero_products' in r) {
+      U.all += num(r.sd_products) || 0;
+      U.hero += num(r.sd_hero_products) || 0;
+      if ('live' in r || 'hero_live' in r) {
+        uHasStatus = true;
+        U.uploaded += num(r.uploaded) || 0; U.live += num(r.live) || 0;
+        U.heroUploaded += num(r.hero_uploaded) || 0; U.heroLive += num(r.hero_live) || 0;
+      }
       continue;
     }
-    // one row per ShopDeck product
-    uHasAll = true;
-    universe[c].all += 1;
-    const flag = String(r.is_hero ?? '').toLowerCase();
-    let hero = ['1', 'true', 'yes', 'y'].includes(flag);
-    if (r.is_hero === undefined) {
-      const o = num(r.l30d_orders) || 0, pr = num(r.profit_pct_d40_d10), sp = num(r.l30d_spend) || 0;
-      hero = o >= s.heroOrdersAll || (o >= s.heroOrdersMin && pr !== null && pr > s.heroMinProfitPct && sp > s.heroMinSpend);
-    }
-    if (hero) universe[c].hero += 1;
+    const n = r.n !== undefined ? num(r.n) || 0 : 1;
+    const up = r.n !== undefined ? num(r.uploaded) || 0 : (r.khoj_product_id ? 1 : 0);
+    const lv = r.n !== undefined ? num(r.live) || 0 : (String(r.current_status || '').toLowerCase() === 'live' ? 1 : 0);
+    if (r.current_status !== undefined || r.n !== undefined) uHasStatus = true;
+    U.all += n; U.uploaded += up; U.live += lv;
+    if (n === 1 && isHeroRow(r)) { U.hero += 1; U.heroUploaded += up; U.heroLive += lv; }
   }
   const hasUniverse = uRows.length > 0;
 
@@ -733,7 +742,8 @@ export function compute(src, s, history, today = todayIST()) {
     for (const a of scales) if (a.cat === c && a.active && a.decision.action !== 'lifecycle') scalingIds.add(a.product ? 'p:' + a.product.id : a.id);
     kpis[c] = {
       live: cov.live, heroLive: cov.heroLive, khojHero: cov.hero,
-      universeHero: hasUniverse ? universe[c].hero : null, universeAll: hasUniverse && uHasAll ? universe[c].all : null,
+      universeHero: hasUniverse ? universe[c].hero : null, universeHeroLive: hasUniverse && uHasStatus ? universe[c].heroLive : null,
+      universeAll: hasUniverse ? universe[c].all : null,
       tested: ts.length, winners: ts.filter((t) => isWin(t.decision.action)).length, losses: ts.filter((t) => isLoss(t.decision.action)).length,
       liveTrials: ts.filter((t) => !t.closed).length,
       scaling: scalingIds.size
@@ -742,7 +752,7 @@ export function compute(src, s, history, today = todayIST()) {
 
   return {
     today, catAov, notes, kpis, killReview,
-    universe: hasUniverse ? { byCat: universe, hasAll: uHasAll } : null,
+    universe: hasUniverse ? { byCat: universe, hasAll: true, hasStatus: uHasStatus, origin: src.universe.origin } : null,
     metaSignal: {
       window: { from: metaSignal.from, to: metaSignal.to },
       uploads: src.metaUpload?.files || [],

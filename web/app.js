@@ -153,6 +153,8 @@ function viewRoom(d) {
   const [live, liveAll] = K('live');
   const [heroLive, heroLiveAll] = K('heroLive');
   const [uHero, uHeroAll] = K('universeHero');
+  const [uHeroLive, uHeroLiveAll] = K('universeHeroLive');
+  const covN = uHeroLive ?? heroLive, covNAll = uHeroLiveAll ?? heroLiveAll;
   const [tested, testedAll] = K('tested');
   const [wins, winsAll] = K('winners');
   const [losses, lossesAll] = K('losses');
@@ -163,7 +165,7 @@ function viewRoom(d) {
   const kpis = [
     ['Live on Khoj', int(live), `All categories: ${int(liveAll)}`],
     ['Hero products (live)', int(heroLive), `All categories: ${int(heroLiveAll)}`],
-    ['Universe coverage (hero)', uHero === null ? '—' : pc(ratio(heroLive, uHero), 1), uHero === null ? 'Connect MB_Q_UNIVERSE (ShopDeck hero universe)' : `${int(heroLive)} of ${int(uHero)} ShopDeck heroes · all categories: ${pc(ratio(heroLiveAll, uHeroAll), 1)}`],
+    ['Universe coverage (hero)', uHero === null ? '—' : pc(ratio(covN, uHero), 1), uHero === null ? 'Connect MB_Q_UNIVERSE (ShopDeck universe)' : `${int(covN)} of ${int(uHero)} ShopDeck heroes live · all categories: ${pc(ratio(covNAll, uHeroAll), 1)}`],
     ['Tested', int(tested), `All categories: ${int(testedAll)}`],
     ['Success rate', sr === null ? '—' : pc(sr), wins + losses ? `${wins} of ${wins + losses} decided${ci !== null ? ` · ±${Math.round(ci)} pts` : ''} · all: ${srAll === null ? '—' : pc(srAll)}` : 'No verdicts yet'],
     ['Live trials', int(liveTrials), `All categories: ${int(liveTrialsAll)}`],
@@ -334,7 +336,7 @@ function logCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck hero universe' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
@@ -348,19 +350,32 @@ function funnelStages(d, keys) {
   const c = (f) => cov.reduce((a, r) => a + r[f], 0);
   const U = d.universe;
   const u = (f) => keys.reduce((a, k) => a + ((U && U.byCat[k]) ? U.byCat[k][f] : 0), 0);
-  const universe = U && U.hasAll ? { n: u('all'), label: 'Universe', note: 'all products on ShopDeck' } : { n: c('uploaded'), label: 'Universe', note: 'products uploaded to Khoj' };
-  const heroU = U ? { n: u('hero'), label: 'Hero universe', note: 'hero products on ShopDeck' } : { n: c('hero'), label: 'Hero universe', note: 'hero among products uploaded to Khoj' };
+  if (U && U.hasStatus) {
+    // Everything from the ShopDeck universe question, so the four stages share one base (PQ ≥ 3).
+    return [
+      { n: u('all'), label: 'Universe', note: 'ShopDeck products, PQ ≥ 3', of: null },
+      { n: u('live'), label: 'Live on Khoj', note: 'of those, live on Khoj', of: ['universe', u('all')] },
+      { n: u('hero'), label: 'Hero universe', note: 'of the universe, hero products', of: ['universe', u('all')] },
+      { n: u('heroLive'), label: 'Hero live on Khoj', note: 'hero and live on Khoj', of: ['hero universe', u('hero')] },
+      { n: u('hero') - u('heroUploaded'), extra: 'Hero not uploaded' },
+      { n: u('heroUploaded') - u('heroLive'), extra: 'Hero uploaded, not live' }
+    ];
+  }
+  const universe = { n: c('uploaded'), label: 'Universe', note: 'products uploaded to Khoj' };
+  const heroU = { n: c('hero'), label: 'Hero universe', note: 'hero among products uploaded to Khoj' };
   return [
     { ...universe, of: null },
     { n: c('live'), label: 'Live on Khoj', note: 'current_status = live', of: ['universe', universe.n] },
     { ...heroU, of: ['universe', universe.n] },
-    { n: c('heroLive'), label: 'Hero live on Khoj', note: 'hero and live', of: ['hero universe', heroU.n] }
+    { n: c('heroLive'), label: 'Hero live on Khoj', note: 'hero and live', of: ['hero universe', heroU.n] },
+    { n: null, extra: 'Hero not uploaded' },
+    { n: c('hero') - c('heroLive'), extra: 'Hero uploaded, not live' }
   ];
 }
 
 function viewCover(d) {
   const keys = d.coverage.map((r) => r.key).filter((k) => k !== 'Total' && inCat(k));
-  const st = funnelStages(d, keys);
+  const st = funnelStages(d, keys).filter((x) => !x.extra);
   const max = Math.max(1, ...st.map((x) => x.n));
   const colors = ['#9A9CA3', 'var(--blue)', '#6E4BB8', 'var(--green)'];
   const funnel = st.map((x, i) => `<div class="funnel-row">
@@ -372,19 +387,19 @@ function viewCover(d) {
   const row = (name, ks, cls) => {
     const f = funnelStages(d, ks);
     const cov = f[2].n ? f[3].n / f[2].n * 100 : null;
-    return `<tr class="${cls}"><td><strong>${esc(name)}</strong></td>${f.map((x) => `<td class="r num">${int(x.n)}</td>`).join('')}<td class="r num ${cov === null ? 'muted' : cov < 30 ? 'bad' : cov < 60 ? 'warn' : 'good'}">${pc(cov, 1)}</td><td class="r num">${int(f[2].n - f[3].n)}</td></tr>`;
+    return `<tr class="${cls}"><td><strong>${esc(name)}</strong></td>${f.slice(0, 4).map((x) => `<td class="r num">${int(x.n)}</td>`).join('')}<td class="r num ${cov === null ? 'muted' : cov < 30 ? 'bad' : cov < 60 ? 'warn' : 'good'}">${pc(cov, 1)}</td><td class="r num">${f[4].n === null ? '—' : int(f[4].n)}</td><td class="r num">${int(f[5].n)}</td></tr>`;
   };
   const rows = cats.map((k) => row(k === 'Other' ? 'Other categories' : k, [k], k === ui.cat ? 'sel' : '')).join('') + row('Total', cats, 'total');
   const s = d.settings;
   const scope = ui.cat === 'All' ? '3 test categories' : ui.cat;
   return `<section class="card" aria-label="Hero coverage">
-    <div class="card-head"><div><h2 style="font-size:20px">Hero coverage funnel · ${esc(scope)}</h2><span class="muted small">Universe → live on Khoj → hero universe → hero live on Khoj</span></div>${chip(d.universe ? 'green' : 'amber', d.universe ? 'ShopDeck universe connected' : 'Universe = Khoj uploads until MB_Q_UNIVERSE is set')}</div>
+    <div class="card-head"><div><h2 style="font-size:20px">Hero coverage funnel · ${esc(scope)}</h2><span class="muted small">Universe → live on Khoj → hero universe → hero live on Khoj</span></div>${chip(d.universe ? 'green' : 'amber', d.universe ? `ShopDeck universe · ${d.universe.origin || 'connected'}` : 'Universe = Khoj uploads until MB_Q_UNIVERSE is set')}</div>
     <div class="funnel" role="img" aria-label="Hero coverage funnel">${funnel}</div>
-    <div class="table-box"><table style="min-width:900px"><thead><tr><th>Category</th><th class="r">Universe</th><th class="r">Live on Khoj</th><th class="r">Hero universe</th><th class="r">Hero live on Khoj</th><th class="r">Hero coverage</th><th class="r">Hero not live</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="table-box"><table style="min-width:900px"><thead><tr><th>Category</th><th class="r">Universe</th><th class="r">Live on Khoj</th><th class="r">Hero universe</th><th class="r">Hero live on Khoj</th><th class="r">Hero coverage</th><th class="r">Hero not uploaded</th><th class="r">Hero uploaded, not live</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="settings">
       <div class="field"><span class="group-title">Hero rule</span><span>L30D seller orders ≥ ${s.heroOrdersAll}: all · ${s.heroOrdersMin}–${s.heroOrdersAll - 1}: only if profit % (D40–D10) &gt; ${s.heroMinProfitPct} and L30D spend &gt; ${inr(s.heroMinSpend)}</span></div>
       <div class="field"><span class="group-title">Kurti &amp; Suits</span><span>Women's kurta sets, kurtas, maternity kurtis, salwar suits, dress material</span></div>
-      <div class="field"><span class="group-title">Hero coverage</span><span>Hero live on Khoj ÷ hero universe. With the ShopDeck universe connected, this is the share of all ShopDeck heroes that are live on Khoj.</span></div>
+      <div class="field"><span class="group-title">Hero coverage</span><span>Hero live on Khoj ÷ hero universe: the share of ShopDeck's hero products (PQ ≥ 3) that are live on Khoj. "Hero not uploaded" and "Hero uploaded, not live" are the two backlogs.</span></div>
     </div>
   </section>`;
 }

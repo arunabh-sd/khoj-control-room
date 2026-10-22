@@ -68,7 +68,7 @@ export function createApi(store) {
         loadedAt: sources.loadedAt,
         store: store.kind,
         sources: Object.fromEntries(SOURCE_NAMES.map((k) => [k, {
-          status: sources[k].status, origin: sources[k].origin, rows: sources[k].rows.length, error: sources[k].error || null,
+          status: sources[k].status, origin: sources[k].origin, rows: sources[k].rawRows ?? sources[k].rows.length, error: sources[k].error || null,
           columns: Object.keys(sources[k].rows[0] || {}), sample: sampleTypes(sources[k].rows)
         }]))
       },
@@ -111,7 +111,7 @@ export function createApi(store) {
     if (srcMatch && req.method === 'POST') {
       if (!SOURCE_NAMES.includes(srcMatch[1])) return json(404, { error: 'Unknown source' });
       const r = await refreshSource(srcMatch[1]);
-      return json(200, { name: srcMatch[1], status: r.status, origin: r.origin, rows: r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
+      return json(200, { name: srcMatch[1], status: r.status, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
     if (p === '/api/state' && req.method === 'GET') return json(200, await buildState());
     if (p === '/api/uploads/meta-products' && req.method === 'POST') {

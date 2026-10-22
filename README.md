@@ -21,7 +21,8 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_PRODUCTS` | `16450` |
 | `MB_Q_ADS` | `16659` |
 | `MB_Q_ADSET_MAP` | `16676` (ad set → product) |
-| `MB_Q_UNIVERSE` | ShopDeck hero universe, when it exists |
+| `MB_Q_UNIVERSE` | `16457` (all ShopDeck products, PQ ≥ 3) |
+| `MB_Q_UNIVERSE_PARAMS` | `min_pq=3` (passed to the question's filters) |
 | `MB_Q_PRODUCT_SPEND` | `16674` (product-wise spend, all campaigns) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
@@ -81,9 +82,11 @@ Product-wise, day-wise spend and GMV across every campaign, catalog included: `s
 
 Eligible products with recent Spend/GMV ≤ 30% are directional hits and go to the front of the trial queue. Never counted in Success%.
 
-### ShopDeck universe (`MB_Q_UNIVERSE`)
+### ShopDeck universe (`MB_Q_UNIVERSE`: Q16457)
 
-Feeds "Universe coverage (hero)" and the Hero coverage funnel. Either counts by category (`khoj_category_l2, khoj_category_l3, khoj_category_l4, sd_products, sd_hero_products`) or one row per ShopDeck product with the category columns plus `is_hero` (or `l30d_orders, l30d_spend, profit_pct_d40_d10`, and the hero rule is applied). Until it's connected, the funnel uses products uploaded to Khoj as the universe.
+All ShopDeck products with PQ ≥ 3: `seller_id, seller_product_id, product_title, khoj_product_id, current_status, seller_product_pq, l30d_spend, l30d_orders, l30d_s_gmv, profit_pct_d40_d10, category_l1..l4`. The TOTAL row is skipped and rows under PQ 3 are dropped. The same hero rule applies. Feeds "Universe coverage (hero)" and the Hero coverage funnel: Universe → Live on Khoj → Hero universe → Hero live on Khoj, plus the two backlogs (hero not uploaded, hero uploaded but not live).
+
+It's ~240k rows, so it's shrunk on load (products with 10+ orders keep their numbers; the rest become counts). For speed, a question that returns counts by category is better, and the dashboard reads it as is: `category_l2, category_l3, category_l4, sd_products, uploaded, live, sd_hero_products, hero_uploaded, hero_live`. With that version the hero rule lives in the SQL, so Rules edits don't change the universe.
 
 ### Meta product breakdown (CSV upload)
 

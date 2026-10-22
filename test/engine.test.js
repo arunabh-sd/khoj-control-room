@@ -199,3 +199,19 @@ test('product signal (Q16674 shape): lifetime spend for eligibility, recent spen
   assert.equal(p1.read, 'hit');
   assert.equal(r.catalog.items.find((i) => i.productId === '2').read, 'thin');
 });
+
+test('universe: product rows (Q16457 shape) and pre-aggregated rows give the same funnel', async () => {
+  const { compactUniverse } = await import('../server/universe.js');
+  const raw = [
+    { seller_id: 'TOTAL', seller_product_id: '3 products' },
+    { seller_id: 's', khoj_product_id: 'k1', current_status: 'live', seller_product_pq: '3.5', l30d_orders: '400', l30d_spend: '9000', profit_pct_d40_d10: '-5', category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees' },
+    { seller_id: 's', khoj_product_id: 'k2', current_status: 'delive', seller_product_pq: '4', l30d_orders: '40', l30d_spend: '6000', profit_pct_d40_d10: '2', category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees' },
+    { seller_id: 's', khoj_product_id: '', current_status: 'not uploaded', seller_product_pq: '3', l30d_orders: '2', category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees' },
+    { seller_id: 's', khoj_product_id: '', current_status: 'not uploaded', seller_product_pq: '2.5', l30d_orders: '900', category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees' }
+  ];
+  const agg = [{ category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees', sd_products: 3, uploaded: 2, live: 1, sd_hero_products: 2, hero_uploaded: 2, hero_live: 1 }];
+  for (const rows of [compactUniverse(raw), agg]) {
+    const r = compute({ ...src([product('1')]), universe: { status: 'ok', rows } }, S, []);
+    assert.deepEqual(r.universe.byCat.Saree, { all: 3, uploaded: 2, live: 1, hero: 2, heroUploaded: 2, heroLive: 1 });
+  }
+});
