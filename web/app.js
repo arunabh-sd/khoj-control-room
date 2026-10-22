@@ -335,7 +335,7 @@ function sourcesCard(d) {
   const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', events: 'Site sessions vs parent sellers', benchmark: 'Repeat benchmark (parent sellers)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
-    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
+    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
     <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”, except the slow ones on a schedule: products every 3 hours; universe, order history and buyer overlap once a day. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
   </section>`;
 }
@@ -507,15 +507,24 @@ function viewAudience(d) {
       ${tbl(segCols('Payment, first Khoj order'), a.byPayment)}
     </div>
     <details><summary class="small">By state (from pincode)</summary><div style="margin-top:8px">${tbl(segCols('State'), a.byState)}</div></details>`);
-  const predict = card('Could we have predicted it', 'Could we have predicted it?', `${int(a.withPrior)} buyers had ShopDeck orders before their first Khoj order (median ${int(a.medianPriorOrders)} orders across ${int(a.medianPriorSellers)} sellers). How many of them had already bought…`, kpiRow([
-    ['The same test category', pc(pr.sameCat, 1), 'Saree, Kurti & Suits or Jewellery, any time in the 12 months'],
-    ['The same category as their last ShopDeck order', pc(a.sameCatAsLast.pct, 1), `of ${int(a.sameCatAsLast.buyers)} whose last order's category is known`],
-    ['The same L4 category', pc(pr.sameL4, 1), `of ${int(pr.categoryKnown)} with a known L4 in their history`],
-    ['From the same parent seller', pc(pr.sameSeller, 1), 'seller-level retargeting would have found them']
+  const P = a.personalisation;
+  const lvl = P ? P.levels : [];
+  const predict = !P ? '' : card('Personalisation potential', 'Could we have predicted the order? Personalisation potential', `Share of ${int(P.orders)} Khoj orders that the customer's earlier signals pointed to, by how specific the signal was and how recent. Earlier orders on any ShopDeck site (and earlier Khoj visits) count; browsing comes next.`, kpiRow([
+    ['Predictable from the last 7 days', pc(lvl.find((x) => x.key === 'any')?.d7, 1), 'same product, seller, L4 or test category'],
+    ['Predictable from the last 30 days', pc(lvl.find((x) => x.key === 'any')?.d30, 1), `${pc(P.active.d30)} of orders had any ShopDeck order in those 30 days`],
+    ['Predictable from 12 months', pc(lvl.find((x) => x.key === 'any')?.d365, 1), `${pc(P.active.d365)} had any order in 12 months`],
+    ['Same L4, last 30 days', pc(lvl.find((x) => x.key === 'l4')?.d30, 1), 'the specific signal a feed can use']
   ]) + tbl([
-    { h: 'First Khoj category', v: (r) => esc(r.key) }, { h: 'Buyers with history', r: 1, v: (r) => int(r.buyers) },
-    { h: 'Same test category', r: 1, v: (r) => pc(r.sameCat, 1) }, { h: 'Same L4', r: 1, v: (r) => pc(r.sameL4, 1) }, { h: 'Same seller', r: 1, v: (r) => pc(r.sameSeller, 1) }
-  ], a.predictByCat) + `<p class="small muted">Test category comes from the history's category columns, the universe question, or the product name. L4 needs category_l4 on the history question (${pc(cu.coverage.sdCategoryKnown)} of ShopDeck lines have it today).</p>`);
+    { h: 'Earlier order was…', v: (r) => esc(r.label) },
+    { h: 'Last 3 days', r: 1, v: (r) => pc(r.d3, 1) }, { h: 'Last 7 days', r: 1, v: (r) => pc(r.d7, 1) },
+    { h: 'Last 30 days', r: 1, v: (r) => pc(r.d30, 1) }, { h: 'Last 12 months', r: 1, v: (r) => pc(r.d365, 1) }
+  ], [...lvl, { label: 'Browsed the same product / L4 on a ShopDeck site', browse: true }].map((r) => (r.browse ? { label: r.label, d3: null, d7: null, d30: null, d365: null } : r)), { min: 720 })
+  + `<div style="margin-top:4px">${tbl([
+    { h: 'Khoj order category', v: (r) => esc(r.key) }, { h: 'Orders', r: 1, v: (r) => int(r.orders) },
+    { h: 'Any signal, 7 days', r: 1, v: (r) => pc(r.any_7, 1) }, { h: 'Same L4, 30 days', r: 1, v: (r) => pc(r.l4_30, 1) },
+    { h: 'Same test category, 30 days', r: 1, v: (r) => pc(r.cat_30, 1) }, { h: 'Same test category, 12 months', r: 1, v: (r) => pc(r.cat_365, 1) }, { h: 'Same seller, 12 months', r: 1, v: (r) => pc(r.seller_365, 1) }
+  ], P.byCat, { min: 860 })}</div>
+  <p class="small muted">Browsing row: waiting for ShopDeck-wide browsing of these customers (needs a customer key on events). L4 is only known for ${pc(cu.coverage.sdCategoryKnown)} of earlier ShopDeck orders, so the L4 row reads low; test category also uses product names. Buyer-level view: of ${int(a.withPrior)} buyers with history, ${pc(pr.sameCat, 1)} had bought the same test category and ${pc(pr.sameSeller, 1)} from the same parent seller.</p>`);
   const cc = (k) => ({ h: `Bought ${k} before`, r: 1, v: (r) => pc(r[k]), cls: (r) => (r.key === k ? 'good' : '') });
   const cross = card('Cross-category purchases', 'Cross-category purchases', 'Of buyers with ShopDeck history: what they had bought before, by what they bought first on Khoj', tbl([
     { h: 'First Khoj category', v: (r) => esc(r.key) }, { h: 'Buyers', r: 1, v: (r) => int(r.known) },
@@ -650,6 +659,45 @@ function viewRepeat(d) {
   return head + cohorts + what + segs + later;
 }
 
+function rcaCard(S) {
+  const R = S.rca;
+  if (!R) return '';
+  const toneCls = { bad: 'notice-orange', good: 'notice-green', info: 'notice-amber' };
+  const f2 = (v) => (v === null || v === undefined ? '—' : v.toFixed(2));
+  const eff = (v) => (v === null || v === undefined ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}`);
+  const segTbl = (title, D) => tbl([
+    { h: title, v: (r) => esc(r.key === 'new' ? 'New visitors' : r.key === 'returning' ? 'Returning visitors' : r.key) },
+    { h: 'Share of sessions: Khoj', r: 1, v: (r) => pc(r.khojShare) }, { h: 'Sellers\' sites', r: 1, v: (r) => pc(r.benchShare) },
+    { h: 'Products / session: Khoj', r: 1, v: (r) => f2(r.khojRate) }, { h: 'Sellers\' sites', r: 1, v: (r) => f2(r.benchRate), cls: (r) => (r.khojRate !== null && r.benchRate !== null && r.khojRate < r.benchRate ? 'bad' : '') },
+    { h: '2+ products: Khoj', r: 1, v: (r) => pc(r.khojMulti) }, { h: 'Sellers\' sites', r: 1, v: (r) => pc(r.benchMulti) }
+  ], D.rows, { min: 860 }) + `<p class="small muted">Of the gap in products per session: mix ${eff(D.mixEffect)}, behaviour within each group ${eff(D.rateEffect)}.</p>`;
+  const sp = R.sameProduct;
+  const body = `
+    <div style="display:flex;flex-direction:column;gap:8px">${R.findings.map((x) => `<div class="notice ${toneCls[x.tone] || 'notice-amber'}">${esc(x.text)}</div>`).join('')}</div>
+    <div><div class="group-title">1 · Where the funnel loses orders</div><div style="margin-top:8px">${tbl([
+      { h: 'Stage', v: (r) => esc(r.label) }, { h: 'Khoj', r: 1, v: (r) => pc(r.khoj, 1) }, { h: 'Sellers\' sites (Khoj-weighted)', r: 1, v: (r) => pc(r.bench, 1) },
+      { h: 'Khoj vs them', r: 1, v: (r) => (r.gapPct === null ? '—' : `${r.gapPct >= 0 ? '+' : ''}${r.gapPct.toFixed(0)}%`), cls: (r) => (r.gapPct === null ? '' : r.gapPct < 0 ? 'bad' : 'good') },
+      { h: 'Share of the shortfall', r: 1, v: (r) => (r.shareOfGap === null ? '<span class="muted small">ahead</span>' : pc(r.shareOfGap)) }
+    ], R.funnel)}</div></div>
+    ${R.hasLanding ? `<div><div class="group-title">2 · Who comes: new vs returning visitors</div><div style="margin-top:8px">${segTbl('Visitors', R.visitors)}</div></div>
+    <div><div class="group-title">3 · What they land on: category</div><div style="margin-top:8px">${segTbl('Landing category', R.categories)}</div><p class="small muted">Landing category known for ${pc(R.landingCatCoverage)} of Khoj sessions.</p></div>
+    <div><div class="group-title">4 · Same product, two storefronts</div><p class="small muted" style="margin:6px 0 8px">New visitors landing on a Khoj product vs new visitors landing on the same product on its seller's own site · ${int(sp.products)} products, ${pc(sp.coverage)} of Khoj new-visitor sessions</p>
+      ${sp.products ? kpiRow([
+        ['Products per session', `${f2(sp.khojRate)} vs ${f2(sp.siteRate)}`, 'Khoj vs own site'],
+        ['Sessions viewing 2+ products', `${pc(sp.khojMulti)} vs ${pc(sp.siteMulti)}`, 'Khoj vs own site'],
+        ['Sessions with a buy-now click', `${pc(sp.khojBn, 1)} vs ${pc(sp.siteBn, 1)}`, 'Khoj vs own site']
+      ]) + tbl([
+        { h: 'Product (biggest gaps)', v: (r) => `${esc(r.name)} <span class="muted small">${esc(r.cat)}</span>` },
+        { h: 'Khoj sessions', r: 1, v: (r) => int(r.khojSessions) }, { h: 'Products / session: Khoj', r: 1, v: (r) => f2(r.khojRate) },
+        { h: 'Own site', r: 1, v: (r) => f2(r.siteRate) }, { h: 'Own-site sessions', r: 1, v: (r) => int(r.siteSessions) }
+      ], sp.worst, { min: 760 }) : '<p class="small muted">No product has enough sessions on both storefronts yet.</p>'}</div>
+    <div><div class="group-title">5 · How deep sessions go</div><div style="margin-top:8px">${tbl([
+      { h: 'Products viewed in the session', v: (r) => esc(r.key) }, { h: 'Khoj', r: 1, v: (r) => pc(r.khoj) }, { h: 'Sellers\' sites', r: 1, v: (r) => pc(r.bench) },
+      { h: 'Buy-now rate: Khoj', r: 1, v: (r) => pc(r.khojBn, 1) }, { h: 'Sellers\' sites', r: 1, v: (r) => pc(r.benchBn, 1) }
+    ], R.depth)}</div></div>` : '<p class="small muted">Levels 2–5 need the updated site sessions query (sql/site_sessions.sql).</p>'}`;
+  return card('Explore RCA', 'Why is explore behaviour different on Khoj?', 'Root cause, from the funnel down to visitors, categories, the same product on both storefronts, and session depth · parent sellers weighted by Khoj orders', body);
+}
+
 function viewCross(d) {
   const S = d.sessions;
   const needs = planned('Cross-selling', 'Does an all-hero marketplace get people to explore and buy beyond the product in the ad?', [
@@ -673,7 +721,7 @@ function viewCross(d) {
     { h: 'Clicked buy-now on', v: (x) => `${esc(x.to)} <span class="muted small">${esc(x.toCat)}${x.sameSeller ? ' · same seller' : ''}</span>` },
     { h: 'Sessions', r: 1, v: (x) => int(x.sessions) }
   ], B.topPairs, { min: 760 }));
-  return explore + beyond;
+  return rcaCard(S) + explore + beyond;
 }
 
 // ---------- Rules ----------
@@ -708,6 +756,8 @@ document.addEventListener('input', (e) => {
   }
 });
 document.addEventListener('click', async (e) => {
+  const rp = e.target.closest('[data-repull]');
+  if (rp) { await fetch(`/api/sources/${rp.dataset.repull}/repull`, { method: 'POST' }); ui.repulled = { ...(ui.repulled || {}), [rp.dataset.repull]: true }; render(); return; }
   const pg = e.target.closest('[data-cpage]');
   if (pg) { custUi.page += Number(pg.dataset.cpage); $('custTable').innerHTML = custTableInner(); $('custTable').scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
   const t = e.target.closest('[data-cat],[data-tab],[data-live],#refresh,#retry,#resetRules');

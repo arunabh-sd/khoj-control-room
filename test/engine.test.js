@@ -313,11 +313,11 @@ test('daily sources: pulled once a day, never on page load once there is a pull'
     const again = await post('universe');
     assert.equal(again.daily, true);
     assert.equal(calls['57'], 1);                             // second page load: no Metabase call
-    await api.runDaily();                                     // first scheduled run after a deploy pulls everything once
+    await api.runDaily({ phase: 3 });                                     // first scheduled run after a deploy pulls everything once
     assert.equal(calls['57'], 2);
-    assert.equal((await api.runDaily()).find((x) => x.name === 'universe').skipped, 'already pulled today');
+    assert.equal((await api.runDaily({ phase: 3 })).find((x) => x.name === 'universe').skipped, 'already pulled today');
     assert.equal(calls['57'], 2);
-    await api.runDaily({ force: true });
+    await api.runDaily({ force: true, phase: 3 });
     assert.equal(calls['57'], 3);
     await post('ads'); await post('ads');
     assert.equal(calls['50'], 2);                             // page-load sources pull on every load

@@ -57,10 +57,16 @@ export function createApi(store) {
   async function getSource(name) {
     if (isDaily(name)) {
       const meta = await getKV('meta:' + name);
-      if (mem[name] && (!meta || mem[name].loadedAt === meta.loadedAt)) return mem[name];
-      const cached = await getKV('source:' + name);
-      if (cached) { mem[name] = cached; return cached; }
-      return { status: 'missing', origin: 'waiting for the daily pull', rows: [], loadedAt: null, daily: true };
+      let src = mem[name] && (!meta || mem[name].loadedAt === meta.loadedAt) ? mem[name] : null;
+      if (!src) { src = await getKV('source:' + name); if (src) mem[name] = src; }
+      if (!src) src = { status: 'missing', origin: 'waiting for the daily pull', rows: [], loadedAt: null, daily: true };
+      // A scheduled pull that started but never finished was stopped by Netlify (30 s for scheduled functions).
+      const running = await getKV('running:' + name);
+      if (running?.at && Date.now() - new Date(running.at).getTime() > 60_000 && (!src.loadedAt || new Date(running.at) > new Date(src.failedAt || src.loadedAt))) {
+        const msg = `the scheduled pull started ${new Date(new Date(running.at).getTime() + 330 * 60000).toISOString().slice(11, 16)} IST and was stopped by Netlify before it finished (30 s limit for scheduled functions). The question is too big or too slow`;
+        return src.status === 'ok' ? { ...src, stale: true, error: msg } : { ...src, status: 'error', error: msg };
+      }
+      return src;
     }
     if (mem[name]) return mem[name];
     const cached = await getKV('source:' + name);
@@ -105,7 +111,9 @@ export function createApi(store) {
       const n = tries && tries.period === period ? tries.n : 0;
       if (!force && n >= 3) return { name, skipped: '3 failed tries this period' };
       await setKV('tries:' + name, { period, n: n + 1 });
+      await setKV('running:' + name, { at: new Date().toISOString(), timeoutMs });
       const r = await refreshSource(name, { timeoutMs });
+      await setKV('running:' + name, { at: null });
       return { name, status: r.status, rows: r.rawRows ?? r.rows.length, error: r.error || null };
     }));
   }
@@ -186,6 +194,14 @@ export function createApi(store) {
     if (!authorised(req)) return new Response('Password required', { status: 401, headers: { 'www-authenticate': 'Basic realm="Khoj Control Room"' } });
 
     if (p === '/api/sources' && req.method === 'GET') return json(200, { sources: SOURCE_NAMES.map((n) => ({ name: n, label: SOURCE_LABELS[n] })) });
+    // Ask the scheduled job to pull a scheduled question again on its next check (e.g. after editing the question).
+    const repull = p.match(/^\/api\/sources\/([A-Za-z]+)\/repull$/);
+    if (repull && req.method === 'POST') {
+      if (!DAILY_SOURCES.includes(repull[1])) return json(404, { error: 'Not a scheduled question' });
+      await setKV('meta:' + repull[1], { loadedAt: null, status: 'repull' });
+      await setKV('tries:' + repull[1], { period: null, n: 0 });
+      return json(200, { ok: true });
+    }
     const srcMatch = p.match(/^\/api\/sources\/([A-Za-z]+)$/);
     if (srcMatch && req.method === 'POST') {
       if (!SOURCE_NAMES.includes(srcMatch[1])) return json(404, { error: 'Unknown source' });

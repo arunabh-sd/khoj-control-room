@@ -18,7 +18,9 @@ const SOURCES = {
   // so they run after products and order history, at half past the hour.
   events: { env: 'MB_Q_EVENTS', file: 'events.csv', label: 'Site sessions: Khoj vs parent sellers', everyHours: 24, phase: 2 },
   benchmark: { env: 'MB_Q_BENCHMARK', file: 'benchmark.csv', label: 'Repeat benchmark: parent sellers', everyHours: 24, phase: 2 },
-  universe: { env: 'MB_Q_UNIVERSE', params: 'MB_Q_UNIVERSE_PARAMS', file: 'universe.csv', label: 'ShopDeck universe (PQ ≥ 3)', everyHours: 24,
+  // Phase 3: the heaviest question gets its own scheduled function, so if it runs out of time it can't take the
+  // others down with it.
+  universe: { env: 'MB_Q_UNIVERSE', params: 'MB_Q_UNIVERSE_PARAMS', file: 'universe.csv', label: 'ShopDeck universe (PQ ≥ 3)', everyHours: 24, phase: 3,
     compact: (rows) => compactUniverse(rows, { minPq: Number(process.env.UNIVERSE_MIN_PQ ?? 3) }) }
 };
 export const SOURCE_NAMES = Object.keys(SOURCES);

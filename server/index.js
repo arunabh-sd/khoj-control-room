@@ -16,7 +16,7 @@ const store = createStore();
 const api = createApi(store);
 // Outside Netlify there's no scheduler: check the daily questions at start and every hour.
 if (!process.env.DATA_DIR && process.env.METABASE_URL) {
-  const daily = () => api.runDaily({ phase: 1 }).then(() => api.runDaily({ phase: 2 })).then((r) => console.log('daily pull', JSON.stringify(r))).catch((e) => console.error('daily pull', e));
+  const daily = () => api.runDaily({ phase: 1 }).then(() => api.runDaily({ phase: 3 })).then(() => api.runDaily({ phase: 2 })).then((r) => console.log('daily pull', JSON.stringify(r))).catch((e) => console.error('daily pull', e));
   setTimeout(daily, 5000);
   setInterval(daily, 3600_000).unref();
 }

@@ -832,19 +832,19 @@ export function compute(src, s, history, today = todayIST()) {
 
   // ---------- Khoj buyers' ShopDeck order history (Q16717): audience, repeat, cross-selling ----------
   let customers = null;
+  const khojToSellerProduct = new Map(), sellerProductCat = new Map();
+  for (const r of uRows) {
+    if (r.khoj_product_id && r.seller_product_id) khojToSellerProduct.set(String(r.khoj_product_id), String(r.seller_product_id));
+    if (r.seller_product_id && r.category_l4) sellerProductCat.set(String(r.seller_product_id), { l4: r.category_l4, cat: categoryOf(r) });
+  }
   if (src.history?.rows?.length) {
-    const khojToSellerProduct = new Map(), sellerProductCat = new Map();
-    for (const r of uRows) {
-      if (r.khoj_product_id && r.seller_product_id) khojToSellerProduct.set(String(r.khoj_product_id), String(r.seller_product_id));
-      if (r.seller_product_id && r.category_l4) sellerProductCat.set(String(r.seller_product_id), { l4: r.category_l4, cat: categoryOf(r) });
-    }
     customers = analyseHistory(src.history.rows, { khojSellerId: s.khojSellerId, sessionMinutes: s.sessionMinutes, idx, khojToSellerProduct, sellerProductCat, productUrl: (p) => productUrl(p, s.khojBaseUrl) });
     if (customers?.error) notes.push(customers.error);
   }
 
   // ---------- Khoj vs parent sellers' own sites, weighted by Khoj orders (site events, repeat benchmark) ----------
   const weights = khojOrderWeights(src.history?.rows || [], s.khojSellerId, idx);
-  const sessions = src.events?.rows?.length ? analyseEvents(src.events.rows, { khojSellerId: s.khojSellerId, weights, idx }) : null;
+  const sessions = src.events?.rows?.length ? analyseEvents(src.events.rows, { khojSellerId: s.khojSellerId, weights, idx, khojToSellerProduct, sellerProductCat, historyRows: src.history?.rows || [] }) : null;
   const repeatBench = src.benchmark?.rows?.length ? analyseRepeatBenchmark(src.benchmark.rows, { khojSellerId: s.khojSellerId, weights }) : null;
 
   return {

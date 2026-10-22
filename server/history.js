@@ -256,6 +256,46 @@ export function analyseHistory(rows, ctx) {
   const compare = { khoj: closedRates(khojLines), shopdeck: closedRates(sdLines), shopdeckBefore: closedRates(sdLines.filter((x) => fkOf.has(x.c) && x.t < fkOf.get(x.c))) };
 
 
+  // ----- personalisation potential: share of Khoj orders that the customer's earlier orders pointed to -----
+  // Signals = any earlier order (ShopDeck sellers and earlier Khoj visits), within N days before the Khoj order.
+  const P_WINDOWS = [3, 7, 30, 365];
+  const kOrders = [];
+  for (const cu of custs) {
+    const seenO = new Set();
+    for (const x of cu.khoj) { if (seenO.has(x.o)) continue; seenO.add(x.o); const p = kp(x); if (p) kOrders.push({ cu, x, p }); }
+  }
+  const sigProduct = (sig) => (sig.s === K ? kp(sig) : null);
+  const P_LEVELS = [
+    ['product', 'The same product', (sig, p) => sig.p === ctx.khojToSellerProduct.get(p.id) || (sig.s === K && sig.p === p.id)],
+    ['seller', 'The same parent seller', (sig, p) => sig.s === p.seller || (sig.s === K && sigProduct(sig)?.seller === p.seller)],
+    ['l4', 'The same L4 category', (sig, p) => !!p.l4 && catOfLine(sig).l4 === p.l4],
+    ['cat', 'The same test category', (sig, p) => p.cat !== 'Other' && catOfLine(sig).cat === p.cat],
+    ['any', 'Any of the above', null]
+  ];
+  const signalsFor = (o, w) => o.cu.all.filter((s) => s.st !== 'C' && s.t < o.x.t - gap && o.x.t - s.t <= w * DAY);
+  const hitAt = (o, w) => {
+    const sigs = signalsFor(o, w);
+    const out = {};
+    for (const [k, , f] of P_LEVELS) if (f) out[k] = sigs.some((s) => f(s, o.p));
+    out.any = Object.values(out).some(Boolean);
+    out.active = sigs.length > 0;
+    return out;
+  };
+  const hits = kOrders.map((o) => ({ o, w: Object.fromEntries(P_WINDOWS.map((w) => [w, hitAt(o, w)])) }));
+  const personalisation = {
+    orders: kOrders.length, windows: P_WINDOWS,
+    levels: P_LEVELS.map(([key, label]) => ({ key, label, ...Object.fromEntries(P_WINDOWS.map((w) => [`d${w}`, pct(hits.filter((h) => h.w[w][key]).length, hits.length)])) })),
+    active: Object.fromEntries(P_WINDOWS.map((w) => [`d${w}`, pct(hits.filter((h) => h.w[w].active).length, hits.length)])),
+    byCat: (() => {
+      const m = new Map();
+      for (const h of hits) { const k = h.o.p.cat || 'Other'; (m.get(k) || m.set(k, []).get(k)).push(h); }
+      return [...m.entries()].map(([key, hs]) => ({ key, orders: hs.length,
+        l4_30: pct(hs.filter((h) => h.w[30].l4).length, hs.length), cat_30: pct(hs.filter((h) => h.w[30].cat).length, hs.length),
+        cat_365: pct(hs.filter((h) => h.w[365].cat).length, hs.length), seller_365: pct(hs.filter((h) => h.w[365].seller).length, hs.length),
+        any_7: pct(hs.filter((h) => h.w[7].any).length, hs.length) })).sort((a, b) => b.orders - a.orders);
+    })()
+  };
+
   // ----- cross-category: what these buyers bought on ShopDeck before Khoj -----
   const CATSX = ['Saree', 'Kurti & Suits', 'Jewellery', 'Other'];
   const crossCat = [];
@@ -352,7 +392,7 @@ export function analyseHistory(rows, ctx) {
     medianPriorOrders: median(withPrior.map(priorOrders)),
     medianPriorSellers: median(withPrior.map((cu) => new Set(cu.prior.map((x) => x.s)).size)),
     byPrior, byUserType, byCategory, byState, byPayment,
-    predict: predict(withPrior), predictByCat, crossCat, byRecency, journeys, sameCatAsLast,
+    predict: predict(withPrior), predictByCat, personalisation, crossCat, byRecency, journeys, sameCatAsLast,
     parent, parentBySeller: parentBySeller.slice(0, 12),
     price, compare
   };
