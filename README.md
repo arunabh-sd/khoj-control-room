@@ -26,6 +26,8 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_PRODUCT_SPEND` | `16674` (product-wise spend, all campaigns) |
 | `MB_Q_OVERLAP` | `16494` (Khoj × parent seller buyer overlap) |
 | `MB_Q_CUSTOMER_HISTORY` | `16717` (Khoj buyers' ShopDeck order history, 12 months) |
+| `MB_Q_EVENTS` | site sessions question (`sql/site_sessions.sql`) |
+| `MB_Q_BENCHMARK` | repeat benchmark question (`sql/repeat_benchmark.sql`) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
 3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
@@ -160,6 +162,14 @@ WHERE o.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
 - Khoj vs site price: Khoj unit price ÷ the median unit price these customers paid for the same product on the parent seller's site (product mapped through the universe question).
 - State comes from the pincode's first three digits.
 
+
+### Khoj vs the parent sellers' own sites (`MB_Q_EVENTS`, `MB_Q_BENCHMARK`)
+
+`sql/site_sessions.sql` (last 28 days of product page opens, buy-now clicks, checkouts and orders) and `sql/repeat_benchmark.sql` (each seller site's own 7/14/28-day repeat) are asked about Khoj plus the **parent sellers** of the products Khoj has sold. Both need a Metabase variable `parent_sellers` of type Text, not required. The dashboard fills it from the order history and products questions, so these two run at half past the hour (`netlify/functions/daily-sellers.mjs`), once a day.
+
+Each parent seller counts in the comparison in proportion to the Khoj orders of its products, so the benchmark is "what these products' own storefronts do". Sellers with under 100 sessions (events) or 20 customers in a window (repeat) are left out; the page shows how much of Khoj's orders the benchmark covers.
+
+The order history question is `sql/customer_history_q16717.sql`.
 
 ## Rules (defaults)
 

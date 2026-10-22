@@ -410,7 +410,14 @@ export function analyseHistory(rows, ctx) {
     const gmv = el.map((cu) => cu.khoj.filter((x) => x.t - cu.fk <= w * DAY).reduce((a, x) => a + x.g, 0));
     return { days: w, eligible: el.length, ordersPerCustomer: el.length ? ords.reduce((a, b) => a + b, 0) / el.length : null, gmvPerCustomer: el.length ? gmv.reduce((a, b) => a + b, 0) / el.length : null };
   });
+  const seg14 = {
+    COD: within(custs.filter((cu) => isCod(cu.firstLines[0].pm)), 14, khojRepeat),
+    Prepaid: within(custs.filter((cu) => !isCod(cu.firstLines[0].pm)), 14, khojRepeat),
+    'New to ShopDeck': within(custs.filter((cu) => cu.newToSd), 14, khojRepeat),
+    'Returning to ShopDeck': within(custs.filter((cu) => !cu.newToSd), 14, khojRepeat)
+  };
   const repeat = {
+    seg14,
     customers: N, end, curves, bench, cohorts, kinds: { lines: repeatLines.length, ...kind }, afterDelivery, value,
     repeaters: custs.filter(repeatOf).length, sessionMinutes: gap
   };

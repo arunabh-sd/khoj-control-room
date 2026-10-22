@@ -14,6 +14,10 @@ const SOURCES = {
   adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' },
   overlap: { env: 'MB_Q_OVERLAP', file: 'overlap.csv', label: 'Khoj × parent seller buyer overlap', everyHours: 24 },
   history: { env: 'MB_Q_CUSTOMER_HISTORY', file: 'history.csv', label: 'Khoj buyers\' ShopDeck order history (12 months)', compact: compactHistory, everyHours: 24 },
+  // Phase 2: asked about Khoj plus the parent sellers of Khoj's ordered products (passed as {{parent_sellers}}),
+  // so they run after products and order history, at half past the hour.
+  events: { env: 'MB_Q_EVENTS', file: 'events.csv', label: 'Site sessions: Khoj vs parent sellers', everyHours: 24, phase: 2 },
+  benchmark: { env: 'MB_Q_BENCHMARK', file: 'benchmark.csv', label: 'Repeat benchmark: parent sellers', everyHours: 24, phase: 2 },
   universe: { env: 'MB_Q_UNIVERSE', params: 'MB_Q_UNIVERSE_PARAMS', file: 'universe.csv', label: 'ShopDeck universe (PQ ≥ 3)', everyHours: 24,
     compact: (rows) => compactUniverse(rows, { minPq: Number(process.env.UNIVERSE_MIN_PQ ?? 3) }) }
 };
@@ -23,8 +27,9 @@ export const SOURCE_LABELS = Object.fromEntries(SOURCE_NAMES.map((k) => [k, SOUR
 // universe, order history and overlap once a day; products (seller L30D numbers, slow to compute) every 3 hours.
 export const DAILY_SOURCES = SOURCE_NAMES.filter((k) => SOURCES[k].everyHours);
 export const EVERY_HOURS = Object.fromEntries(DAILY_SOURCES.map((k) => [k, SOURCES[k].everyHours]));
+export const PHASE = Object.fromEntries(DAILY_SOURCES.map((k) => [k, SOURCES[k].phase || 1]));
 
-export async function loadOne(name, { timeoutMs } = {}) {
+export async function loadOne(name, { timeoutMs, params } = {}) {
   const src = SOURCES[name];
   if (!src) throw new Error(`Unknown source ${name}`);
   const loadedAt = new Date().toISOString();
@@ -44,7 +49,7 @@ export async function loadOne(name, { timeoutMs } = {}) {
     }
     const id = process.env[src.env] || (src.alt && process.env[src.alt]);
     if (!id) return { status: 'missing', origin: `${src.env} not set`, rows: [], loadedAt };
-    let rows = await runCard(id, src.params ? process.env[src.params] : '', { timeoutMs });
+    let rows = await runCard(id, src.params ? process.env[src.params] : '', { timeoutMs, params });
     const rawRows = rows.length;
     if (src.compact) rows = src.compact(rows);
     return { status: 'ok', origin: `Metabase Q${id}`, rows, rawRows, loadedAt };

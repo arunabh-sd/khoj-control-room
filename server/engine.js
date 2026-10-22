@@ -1,6 +1,7 @@
 // The rules engine: turns source rows + settings + decision history into every view and task.
 import { TEST_CATEGORIES, categoryOf } from './categories.js';
 import { analyseHistory } from './history.js';
+import { khojOrderWeights, analyseEvents, analyseRepeatBenchmark } from './benchmarks.js';
 
 const CATS_ALL = [...TEST_CATEGORIES, 'Other'];
 
@@ -114,6 +115,7 @@ function pqByKhojId(uRows) {
 }
 
 // ---------- products ----------
+export function buildProductIndex(rows, s) { return buildProducts(rows, s, null); }
 function buildProducts(rows, s, pqMap) {
   const products = [];
   const byId = new Map();
@@ -840,8 +842,13 @@ export function compute(src, s, history, today = todayIST()) {
     if (customers?.error) notes.push(customers.error);
   }
 
+  // ---------- Khoj vs parent sellers' own sites, weighted by Khoj orders (site events, repeat benchmark) ----------
+  const weights = khojOrderWeights(src.history?.rows || [], s.khojSellerId, idx);
+  const sessions = src.events?.rows?.length ? analyseEvents(src.events.rows, { khojSellerId: s.khojSellerId, weights, idx }) : null;
+  const repeatBench = src.benchmark?.rows?.length ? analyseRepeatBenchmark(src.benchmark.rows, { khojSellerId: s.khojSellerId, weights }) : null;
+
   return {
-    today, catAov, notes, kpis, killReview, overlap, customers,
+    today, catAov, notes, kpis, killReview, overlap, customers, sessions, repeatBench,
     universe: hasUniverse ? { byCat: universe, hasAll: true, hasStatus: uHasStatus, origin: src.universe.origin } : null,
     activeTrialKeys: trials.filter((t) => t.active).map((t) => t.id),
     coverage: coverageRows,

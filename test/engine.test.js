@@ -329,3 +329,32 @@ test('daily sources: pulled once a day, never on page load once there is a pull'
     for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
 });
+
+test('parent-seller benchmarks are weighted by Khoj orders', async () => {
+  const { khojOrderWeights, analyseEvents, analyseRepeatBenchmark, parentSellerList } = await import('../server/benchmarks.js');
+  const idx = { byId: new Map([['k1', { id: 'k1', seller: 'A', cat: 'Saree', title: 'one' }], ['k2', { id: 'k2', seller: 'B', cat: 'Jewellery', title: 'two' }]]), bySku: new Map(), byCode: new Map() };
+  const hist = [
+    { s: 'K', o: '1', p: 'k1', st: 'D' }, { s: 'K', o: '2', p: 'k1', st: 'D' }, { s: 'K', o: '3', p: 'k1', st: 'O' },
+    { s: 'K', o: '4', p: 'k2', st: 'D' }, { s: 'K', o: '5', p: 'k2', st: 'C' }, { s: 'X', o: '6', p: 'k2', st: 'D' }
+  ];
+  const w = khojOrderWeights(hist, 'K', idx);
+  assert.deepEqual(Object.fromEntries(w), { A: 3, B: 1 });
+  assert.deepEqual(parentSellerList(w), ['A', 'B']);
+  const ev = analyseEvents([
+    { kind: 'seller', seller_id: 'K', sessions: 1000, products_viewed: 3000, ppo: 4000, multi_product_sessions: 500, secs: 60000, buy_now_sessions: 100, multi_buy_now_sessions: 10, checkout_sessions: 50, orders: 20 },
+    { kind: 'seller', seller_id: 'A', sessions: 1000, products_viewed: 2000, ppo: 2500, multi_product_sessions: 300, secs: 50000, buy_now_sessions: 100, multi_buy_now_sessions: 5, checkout_sessions: 60, orders: 30 },
+    { kind: 'seller', seller_id: 'B', sessions: 1000, products_viewed: 1000, ppo: 1200, multi_product_sessions: 100, secs: 40000, buy_now_sessions: 100, multi_buy_now_sessions: 5, checkout_sessions: 60, orders: 30 },
+    { kind: 'khoj_click', seller_id: 'K', sessions: 6, landing_product: 'k1', clicked_product: 'k1' },
+    { kind: 'khoj_click', seller_id: 'K', sessions: 4, landing_product: 'k1', clicked_product: 'k2' }
+  ], { khojSellerId: 'K', weights: w, idx });
+  const ppv = ev.metrics.find((m) => m.key === 'productsPerSession');
+  assert.equal(ppv.khoj, 3);
+  assert.equal(ppv.bench, (3 * 2 + 1 * 1) / 4);          // A weighs 3, B weighs 1
+  assert.equal(ev.beyond.otherPct, 40);
+  assert.equal(ev.beyond.otherAnotherSellerPct, 100);
+  const rb = analyseRepeatBenchmark([
+    { seller_id: 'A', eligible_14: 100, repeat_14: 10 }, { seller_id: 'B', eligible_14: 100, repeat_14: 30 }, { seller_id: 'K', eligible_14: 50, repeat_14: 5 }
+  ], { khojSellerId: 'K', weights: w });
+  assert.equal(rb.rates.d14, (3 * 10 + 1 * 30) / 4);
+  assert.equal(rb.khojFromQuestion.d14, 10);
+});

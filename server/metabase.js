@@ -26,6 +26,12 @@ export function parseParams(str) {
   return out;
 }
 
+// { parent_sellers: 'a,b,c' } → text variables, passed as is (commas included).
+function textParams(obj) {
+  return Object.entries(obj || {}).filter(([, v]) => v !== '' && v !== null && v !== undefined)
+    .map(([k, v]) => ({ type: 'category', target: ['variable', ['template-tag', k]], value: String(v) }));
+}
+
 export async function runCard(cardId, paramStr = '', opts = {}) {
   const base = (process.env.METABASE_URL || '').replace(/\/+$/, '');
   const key = process.env.METABASE_API_KEY;
@@ -40,7 +46,7 @@ export async function runCard(cardId, paramStr = '', opts = {}) {
     res = await fetch(`${base}/api/card/${encodeURIComponent(cardId)}/query/json`, {
       method: 'POST',
       headers: { 'x-api-key': key, 'content-type': 'application/json' },
-      body: JSON.stringify({ format_rows: false, pivot_results: false, parameters: parseParams(paramStr) }),
+      body: JSON.stringify({ format_rows: false, pivot_results: false, parameters: [...parseParams(paramStr), ...textParams(opts.params)] }),
       signal: ctrl.signal
     });
     if (res.ok) {

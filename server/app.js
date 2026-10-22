@@ -1,6 +1,8 @@
 // Platform-neutral API: a function from a web-standard Request to a Response.
 // Used by the Netlify Function (netlify/functions/api.mjs) and by the local Node server (server/index.js).
-import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES, EVERY_HOURS } from './sources.js';
+import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES, EVERY_HOURS, PHASE } from './sources.js';
+import { khojOrderWeights, parentSellerList } from './benchmarks.js';
+import { buildProductIndex } from './engine.js';
 import { compute, todayIST } from './engine.js';
 import { DEFAULT_SETTINGS, SETTING_LABELS, mergeSettings } from './rules.js';
 
@@ -25,7 +27,16 @@ export function createApi(store) {
   // Runs one Metabase question now and keeps the result for every later request.
   // A failed pull (timeout, Metabase error) keeps the last good pull, flagged stale, so one slow question doesn't
   // blank the dashboard.
+  // Phase-2 questions are asked about Khoj and the parent sellers of what Khoj has sold.
+  async function phase2Params() {
+    const settings = mergeSettings(await store.getSettings());
+    const [history, products] = [await getSource('history'), await getSource('products')];
+    const idx = buildProductIndex(products.rows || [], settings);
+    return { parent_sellers: parentSellerList(khojOrderWeights(history.rows || [], settings.khojSellerId, idx)).join(',') };
+  }
+
   async function refreshSource(name, opts = {}) {
+    if (PHASE[name] === 2 && !opts.params) opts = { ...opts, params: await phase2Params() };
     const result = await loadOne(name, opts);
     if (result.status === 'error') {
       const prev = mem[name] || (await getKV('source:' + name));
@@ -79,14 +90,14 @@ export function createApi(store) {
   };
   // Bump when a deploy changes what the scheduled questions need (columns, compaction): the next scheduled run then
   // pulls every scheduled question once, whatever was pulled earlier that day.
-  const SCHEDULE_VERSION = '2026-10-22.2';
-  async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false } = {}) {
+  const SCHEDULE_VERSION = '2026-10-22.3';
+  async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false, phase = 1 } = {}) {
     const now = new Date().toISOString();
-    if (!force && (await getKV('schedule-version')) !== SCHEDULE_VERSION) {
+    if (!force && (await getKV('schedule-version:' + phase)) !== SCHEDULE_VERSION) {
       force = true;
-      await setKV('schedule-version', SCHEDULE_VERSION);
+      await setKV('schedule-version:' + phase, SCHEDULE_VERSION);
     }
-    return Promise.all(DAILY_SOURCES.map(async (name) => {
+    return Promise.all(DAILY_SOURCES.filter((name) => PHASE[name] === phase).map(async (name) => {
       const period = periodOf(name, now);
       const meta = await getKV('meta:' + name);
       if (!force && meta && meta.status === 'ok' && periodOf(name, meta.loadedAt) === period) return { name, skipped: EVERY_HOURS[name] >= 24 ? 'already pulled today' : `already pulled in this ${EVERY_HOURS[name]}-hour window` };

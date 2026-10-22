@@ -136,7 +136,7 @@ function renderChrome() {
       else if (s.status === 'error') notices.push(`<div class="notice notice-orange"><strong>${esc(k)}</strong> source failed (${esc(s.origin)}): ${esc(s.error)}</div>`);
       else if (s.stale) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> didn't refresh (${esc(s.error)}). Showing the pull from ${esc(fmtWhen(s.loadedAt))}${s.daily ? '; the scheduled pull retries on the hour' : ''}.</div>`);
       else if (s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: waiting for the scheduled pull, which runs on the hour.</div>`);
-      else if (s.status === 'missing' && !['universe', 'overlap', 'history'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
+      else if (s.status === 'missing' && !['universe', 'overlap', 'history', 'events', 'benchmark'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
     }
     for (const n of d.notes) notices.push(`<div class="notice notice-amber">${esc(n)}</div>`);
     if (d.meta.store === 'memory') notices.push('<div class="notice notice-amber">No persistent store: task ticks and the decision log are kept in memory and reset on restart.</div>');
@@ -332,7 +332,7 @@ function logCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', events: 'Site sessions vs parent sellers', benchmark: 'Repeat benchmark (parent sellers)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
@@ -470,13 +470,12 @@ const segCols = (head) => [
   { h: 'Buyers', r: 1, v: (r) => int(r.buyers) }, { h: 'Share', r: 1, v: (r) => pc(r.share, 1) },
   { h: 'COD', r: 1, v: (r) => pc(r.codPct) }, { h: 'RTO', r: 1, v: (r) => pc(r.rtoPct), cls: (r) => rtoTone(r.rtoPct) }
 ];
-const repeatCols = (head) => [
-  { h: head, v: (r) => esc(r.key) }, { h: 'Buyers', r: 1, v: (r) => int(r.buyers) },
-  { h: 'With a 2nd Khoj order', r: 1, v: (r) => pc(r.repeatPct, 1) }, { h: 'Other ShopDeck sellers', r: 1, v: () => '<span class="muted small">needs data point 2</span>' }
-];
-const DATA_EVENTS = ['Data point 1 · Khoj site events', 'visitor_id, customer_id (once known), session_id, event (page_view / view_item / add_to_cart / begin_checkout / purchase), khoj_product_id, seller_id, timestamp, utm_campaign, utm_content'];
-const DATA_BENCH = ['Data point 2 · ShopDeck seller benchmark', 'orders on ShopDeck seller sites in the same categories (and for the same hero products), excluding Khoj: customer_id, seller_id, order_date, category_l4, product_id, item_gmv, payment_mode, order_status (or the same repeat views pre-aggregated by category and first-order week)'];
-const DATA_PROFILE = ['Data point 3 · Customer profile', 'customer_id, gender, age_group, city_tier (and the order → ad link: order_id, utm_campaign, utm_content)'];
+
+const DATA_EVENTS = ['Site sessions (MB_Q_EVENTS)', 'the site events question in the README: Khoj and its parent sellers, last 28 days'];
+const DATA_BENCH = ['Repeat benchmark (MB_Q_BENCHMARK)', 'the repeat benchmark question in the README: Khoj and its parent sellers'];
+const DATA_LINK = ['Visitor → customer link', 'events carry visitor_id; showing what a buyer browsed needs the customer_id (or phone) on an event such as checkout_initiated'];
+// Khoj vs the parent sellers' own sites, weighted by Khoj orders: the comparison value for a rate.
+const benchCell = (v, unit = 'pct') => (v === null || v === undefined ? '<span class="muted small">—</span>' : unit === 'pct' ? pc(v, 1) : v.toFixed(v < 10 ? 2 : 0));
 function historyMissing(title) {
   return card(title, title, '', `<p class="small muted">Set <code>MB_Q_CUSTOMER_HISTORY</code> to the order history question (Q16717) to turn this on.</p>`, chip('amber', 'Not connected'));
 }
@@ -488,12 +487,10 @@ function historySub(d) {
 function viewAudience(d) {
   const cu = d.customers;
   const overlapMissing = `<section class="card"><div class="card-head"><h2>Cannibalisation · Khoj × parent seller</h2>${chip('amber', 'Not connected')}</div><p class="small muted">Set <code>MB_Q_OVERLAP</code> to the overlap question (Q16494).</p></section>`;
-  const later = planned('Still to come', 'Needs data the order history doesn\'t carry', [
-    ['Browsed but didn\'t buy', ['Products and categories each buyer viewed or carted on Khoj without buying, next to their journey', 'Visitors who never bought: what they looked at, and how they match ShopDeck buyers']],
-    ['Demographics', ['Gender, age group, city tier']],
-    ['Acquisition', ['Which campaigns and seeds bring which segments, and at what Spend/GMV']],
+  const later = planned('Still to come', 'Needs a visitor → customer link in the events', [
+    ['Browsed but didn\'t buy', ['Products and categories each buyer viewed or clicked buy-now on without buying, in their timeline', 'Visitors who never bought: what they looked at']],
     ['Next-best product per customer', ['Top hero products per customer from their journey, category affinity and price band', 'Export as Meta custom audiences']]
-  ], [DATA_EVENTS, DATA_PROFILE]);
+  ], [DATA_LINK]);
   if (!cu || cu.error || !cu.audience) return historyMissing('Audience intelligence') + (d.overlap ? overlapCard(d) : overlapMissing) + later;
   const a = cu.audience, pr = a.predict, pa = a.parent, cmp = a.compare;
   const recent7 = a.byRecency.find((x) => x.key === 'Within 7 days');
@@ -567,7 +564,7 @@ function customersCard(d) {
   return `<section class="card" aria-label="Customers">
     <div class="card-head"><div><h2>Customers</h2><span class="muted small">Every Khoj buyer: their ShopDeck journey, their Khoj orders and a one-line read · newest first · click a row for the full timeline</span></div></div>
     <div id="custTable">${custTableInner()}</div>
-    <p class="small muted">Coming with data point 1: what each buyer browsed or carted on Khoj without buying, in their timeline.</p>
+    <p class="small muted">Coming once events carry the customer: what each buyer browsed on Khoj without buying, in their timeline.</p>
   </section>`;
 }
 function custFiltered() {
@@ -612,48 +609,71 @@ function custTableInner() {
 }
 
 function viewRepeat(d) {
-  const cu = d.customers;
-  const later = planned('Compare every view against other ShopDeck sellers', 'Each repeat view here needs the same number for buyers on ShopDeck seller sites, so Khoj can be judged against them', [
-    ['Repeat curves', ['7 / 14 / 28-day repeat for buyers of the same categories on seller sites, matched by first-order week']],
-    ['What they come back for', ['Same product / same L4 / another category on seller sites']],
-    ['Segments', ['Repeat by ShopDeck history, category and payment on seller sites', 'By acquisition campaign (needs the order → ad link)']]
-  ], [DATA_BENCH, DATA_PROFILE]);
+  const cu = d.customers, B = d.repeatBench;
+  const pending = '<span class="muted small">waiting for the benchmark</span>';
+  const later = B ? '' : planned('Compare against the parent sellers', 'Every view here gets a column for the parent sellers\' own sites, weighted by Khoj orders', [
+    ['Repeat curves', ['7 / 14 / 28-day repeat on the parent sellers\' own sites']],
+    ['What they come back for', ['Same product vs another product']],
+    ['Segments', ['Repeat by payment and by new vs returning to ShopDeck']]
+  ], [DATA_BENCH]);
   if (!cu || cu.error || !cu.repeat) return historyMissing('Repeat behaviour') + later;
-  const r = cu.repeat, k = r.kinds, a = cu.audience;
-  const w = (n) => r.curves.find((c) => c.days === n), b = (n) => r.bench.find((c) => c.days === n);
-  const head = card('Do Khoj buyers come back', 'Do Khoj buyers come back?', `A repeat is another Khoj order more than ${int(r.sessionMinutes)} minutes after the first (buy-now places one order per item). Each window counts only buyers whose first order is at least that old.`, kpiRow([
-    ['Back on Khoj within 7 days', w(7).khoj.eligible ? pc(w(7).khoj.pct, 1) : '—', `${int(w(7).khoj.eligible)} buyers old enough`],
-    ['Back on Khoj within 14 days', w(14).khoj.eligible ? pc(w(14).khoj.pct, 1) : '—', `${int(w(14).khoj.eligible)} buyers old enough`],
-    ['Back on Khoj within 28 days', w(28).khoj.eligible ? pc(w(28).khoj.pct, 1) : '—', w(28).khoj.eligible ? `${int(w(28).khoj.eligible)} buyers old enough` : 'no buyer is 28 days old yet'],
+  const r = cu.repeat, k = r.kinds;
+  const w = (n) => r.curves.find((c) => c.days === n);
+  const bv = (key) => (B ? benchCell(B.rates[key]) : pending);
+  const benchNote = B ? `Parent sellers = the own sites of the sellers whose products Khoj sold, each weighted by its Khoj orders (${int(B.sellers)} sellers, ${pc(B.coverage)} of Khoj orders covered). Their repeat is to the same site, from first orders with that seller in the last 120 days, the same way Khoj is one storefront.` : '';
+  const head = card('Do Khoj buyers come back', 'Do Khoj buyers come back?', `A repeat is another order more than ${int(r.sessionMinutes)} minutes after the first (buy-now places one order per item). Each window counts only buyers whose first order is at least that old.`, kpiRow([
+    ['Back on Khoj within 7 days', w(7).khoj.eligible ? pc(w(7).khoj.pct, 1) : '—', `parent sellers: ${B ? pc(B.rates.d7, 1) : 'pending'}`],
+    ['Back on Khoj within 14 days', w(14).khoj.eligible ? pc(w(14).khoj.pct, 1) : '—', `parent sellers: ${B ? pc(B.rates.d14, 1) : 'pending'}`],
+    ['Back on Khoj within 28 days', w(28).khoj.eligible ? pc(w(28).khoj.pct, 1) : '—', w(28).khoj.eligible ? `parent sellers: ${B ? pc(B.rates.d28, 1) : 'pending'}` : `no Khoj buyer is 28 days old yet · parent sellers: ${B ? pc(B.rates.d28, 1) : 'pending'}`],
     ['Ordered from another ShopDeck seller within 7 days', pc(w(7).otherSellers.pct, 1), `the parent seller: ${pc(w(7).parentSeller.pct, 1)}`]
   ]) + tbl([
     { h: 'Window', v: (x) => `${x.days} days` },
     { h: 'Back on Khoj', r: 1, v: (x) => nOf(x.khoj) },
-    { h: 'Other ShopDeck sellers\' buyers', r: 1, v: () => '<span class="muted small">needs data point 2</span>' },
-    { h: 'Same customers, back to the same seller site', r: 1, v: (x) => { const y = b(x.days); return y?.eligible ? `${pc(y.sameSellerPct, 1)} <span class="muted small">of ${int(y.eligible)}</span>` : '—'; } },
+    { h: 'Parent sellers\' own sites (Khoj-weighted)', r: 1, v: (x) => bv(`d${x.days}`) },
     { h: 'After Khoj: another ShopDeck seller', r: 1, v: (x) => nOf(x.otherSellers) }
-  ], r.curves, { min: 860 }) + '<p class="small muted">"Same customers, back to the same seller site" is a stand-in until data point 2: these Khoj buyers from their first seller-site order in the 12 months. It leans high, because a Khoj buyer has at least one more order by definition.</p>');
-  const cohorts = card('Cohorts', 'By week of first Khoj order', 'Repeat rate among buyers in the week whose first order is old enough for the window · seller-site cohorts come with data point 2', tbl([
-    { h: 'Week of', v: (x) => esc(fmtDate(x.week)) }, { h: 'Buyers', r: 1, v: (x) => int(x.customers) },
-    { h: '7 days', r: 1, v: (x) => nOf(x.w7) }, { h: '14 days', r: 1, v: (x) => nOf(x.w14) }, { h: '28 days', r: 1, v: (x) => nOf(x.w28) }
-  ], r.cohorts));
+  ], r.curves, { min: 760 }) + (benchNote ? `<p class="small muted">${benchNote}</p>` : ''));
+  const cohorts = card('Cohorts', 'By week of first Khoj order', 'Repeat rate among buyers in the week whose first order is old enough for the window', tbl([
+    { h: 'Week of', v: (x) => esc(x.week === 'bench' ? 'Parent sellers (Khoj-weighted)' : fmtDate(x.week)) }, { h: 'Buyers', r: 1, v: (x) => (x.week === 'bench' ? '' : int(x.customers)) },
+    { h: '7 days', r: 1, v: (x) => (x.week === 'bench' ? bv('d7') : nOf(x.w7)) }, { h: '14 days', r: 1, v: (x) => (x.week === 'bench' ? bv('d14') : nOf(x.w14)) }, { h: '28 days', r: 1, v: (x) => (x.week === 'bench' ? bv('d28') : nOf(x.w28)) }
+  ], [...r.cohorts, { week: 'bench' }]));
   const share = (n) => pc(k.lines ? n / k.lines * 100 : null);
-  const what = card('What they come back for', 'What they come back for', `${int(k.lines)} repeat Khoj order lines · seller-site split comes with data point 2`, kpiRow([
-    ['The same product', share(k.sameProduct), `${int(k.sameProduct)} lines`],
+  const what = card('What they come back for', 'What they come back for', `${int(k.lines)} repeat Khoj order lines`, kpiRow([
+    ['The same product', share(k.sameProduct), `parent sellers: ${B ? pc(B.sameProductPct) : 'pending'}`],
     ['Another product, same L4', share(k.sameL4), `${int(k.sameL4)} lines`],
     ['Another category', share(k.otherL4), `${int(k.otherL4)} lines`],
-    ['From another parent seller', share(k.otherParent), 'cross-seller repeat, the marketplace thesis']
+    ['From another parent seller', share(k.otherParent), 'cross-seller repeat, the marketplace thesis; a seller site can\'t do this']
   ]));
-  const segs = card('Repeat by segment', 'Repeat by segment', 'Share of buyers with a second Khoj order so far', `<div class="grid-2">${tbl(repeatCols('ShopDeck history'), a.byUserType)}${tbl(repeatCols('First Khoj category'), a.byCategory)}</div>`);
+  const segRows = Object.entries(r.seg14).map(([key, v]) => ({ key, v, b: B ? B.segments[key] : null }));
+  const segs = card('Repeat by segment', 'Repeat by segment · 14 days', 'Buyers whose first order is at least 14 days old', tbl([
+    { h: 'Segment', v: (x) => esc(x.key) }, { h: 'Back on Khoj', r: 1, v: (x) => nOf(x.v) }, { h: 'Parent sellers\' own sites (Khoj-weighted)', r: 1, v: (x) => (B ? benchCell(x.b) : pending) }
+  ], segRows));
   return head + cohorts + what + segs + later;
 }
 
-function viewCross() {
-  return planned('Cross-selling', 'Does an all-hero marketplace get people to explore and buy beyond the product in the ad? This needs browsing data: what people view, cart and buy in a session.', [
-    ['Beyond the landing product', ['Share of orders where the bought product isn\'t the ad\'s product', 'Same seller vs another seller; same category vs another category', 'Per ad set: GMV from the landing product vs from other products (the uplift behind the ad set Spend/GMV verdict)']],
-    ['Explore behaviour', ['Product pages viewed per session; distinct products and sellers viewed', 'Sessions that view more than one product', 'Search and category-page use', 'Funnel: landing product → other product page → add-to-cart → purchase']],
-    ['Baskets', ['Multi-product, multi-seller and cross-category sessions, with and without a purchase', 'Against the same buyers on seller sites (from the order history)']]
+function viewCross(d) {
+  const S = d.sessions;
+  const needs = planned('Cross-selling', 'Does an all-hero marketplace get people to explore and buy beyond the product in the ad?', [
+    ['Explore behaviour', ['Products viewed per session, sessions viewing 2+ products, time per session', 'Against the parent sellers\' own sites, weighted by Khoj orders']],
+    ['Beyond the landing product', ['Buy-now clicks on a product other than the first one viewed (the ad\'s product), same or another seller and category']]
   ], [DATA_EVENTS]);
+  if (!S) return needs;
+  const B = S.beyond;
+  const explore = card('Explore behaviour', 'Explore behaviour: Khoj vs the parent sellers\' own sites', `Last 28 days · ${int(S.khojSessions)} Khoj sessions · parent sellers weighted by Khoj orders (${int(S.parentSellers)} sellers)`, tbl([
+    { h: 'Metric', v: (m) => esc(m.label) },
+    { h: 'Khoj', r: 1, v: (m) => benchCell(m.khoj, m.unit) },
+    { h: 'Parent sellers (Khoj-weighted)', r: 1, v: (m) => benchCell(m.bench, m.unit) },
+    { h: 'Khoj vs them', r: 1, v: (m) => (m.khoj === null || m.bench === null || !m.bench ? '—' : `${m.khoj >= m.bench ? '+' : ''}${(((m.khoj - m.bench) / m.bench) * 100).toFixed(0)}%`), cls: (m) => (m.khoj !== null && m.bench ? (m.khoj >= m.bench ? 'good' : 'bad') : '') }
+  ], S.metrics) + `<p class="small muted">Covers ${pc(S.metrics[0]?.coverage)} of Khoj orders: parent sellers with under 100 sessions are left out.</p>`);
+  const beyond = card('Beyond the landing product', 'Beyond the landing product', `Khoj buy-now clicks by the session's first product page (in practice, the ad's product) · ${int(B.clicks)} session-product clicks`, kpiRow([
+    ['Clicked a different product', pc(B.otherPct, 1), 'than the one they landed on'],
+    ['…from another seller', pc(B.otherAnotherSellerPct, 1), 'of those, a different parent seller'],
+    ['…in another category', pc(B.otherAnotherCatPct, 1), 'of those, a different test category']
+  ]) + tbl([
+    { h: 'Landed on', v: (x) => `${esc(x.from)} <span class="muted small">${esc(x.fromCat)}</span>` },
+    { h: 'Clicked buy-now on', v: (x) => `${esc(x.to)} <span class="muted small">${esc(x.toCat)}${x.sameSeller ? ' · same seller' : ''}</span>` },
+    { h: 'Sessions', r: 1, v: (x) => int(x.sessions) }
+  ], B.topPairs, { min: 760 }));
+  return explore + beyond;
 }
 
 // ---------- Rules ----------
