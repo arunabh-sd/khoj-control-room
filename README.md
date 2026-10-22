@@ -88,7 +88,28 @@ Eligible products with recent Spend/GMV ≤ 30% are directional hits and go to t
 
 All ShopDeck products with PQ ≥ 3: `seller_id, seller_product_id, product_title, khoj_product_id, current_status, seller_product_pq, l30d_spend, l30d_orders, l30d_s_gmv, profit_pct_d40_d10, category_l1..l4`. The TOTAL row is skipped and rows under PQ 3 are dropped. The same hero rule applies, and it is also where Khoj products get their PQ for the hero PQ bar. Feeds "Universe coverage (hero)" and the Hero coverage funnel: Universe → Live on Khoj → Hero universe → Hero live on Khoj, plus the two backlogs (hero not uploaded, hero uploaded but not live).
 
-It's ~240k rows, so it's shrunk on load (products with 10+ orders keep their numbers; the rest become counts). For speed, a question that returns counts by category is better, and the dashboard reads it as is: `category_l2, category_l3, category_l4, sd_products, uploaded, live, sd_hero_products, hero_uploaded, hero_live`. With that version the hero rule lives in the SQL, so Rules edits don't change the universe, and Khoj products get no PQ (the PQ bar is then skipped, with a note). Hero expression for that SQL:
+**Use the lighter version on Netlify.** The full question is ~240k rows (~47 MB) and can't come back inside a 10-second function. Wrap the current SQL so products that matter come back one per row and the rest come back as counts (`n`) per category; the funnel numbers come out the same:
+
+```sql
+WITH u AS (
+  -- Q16457's current SQL, unchanged (keep {{min_pq}})
+)
+SELECT seller_id, seller_product_id, product_title, khoj_product_id, current_status, seller_product_pq,
+       l30d_spend, l30d_orders, profit_pct_d40_d10, category_l1, category_l2, category_l3, category_l4, 1 AS n
+FROM u
+WHERE COALESCE(CAST(seller_id AS STRING), '') != 'TOTAL'
+  AND (khoj_product_id IS NOT NULL OR COALESCE(l30d_orders, 0) >= 10)
+UNION ALL
+SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, category_l1, category_l2, category_l3, category_l4, COUNT(*)
+FROM u
+WHERE COALESCE(CAST(seller_id AS STRING), '') != 'TOTAL'
+  AND khoj_product_id IS NULL AND COALESCE(l30d_orders, 0) < 10
+GROUP BY category_l1, category_l2, category_l3, category_l4
+```
+
+Each Metabase call gives up after 7.5 s (`MB_TIMEOUT_MS`) so the page still loads; a question that fails keeps its last good pull and the page says which one failed.
+
+Without the lighter version, it's ~240k rows, so it's shrunk on load (products with 10+ orders keep their numbers; the rest become counts). For speed, a question that returns counts by category is better, and the dashboard reads it as is: `category_l2, category_l3, category_l4, sd_products, uploaded, live, sd_hero_products, hero_uploaded, hero_live`. With that version the hero rule lives in the SQL, so Rules edits don't change the universe, and Khoj products get no PQ (the PQ bar is then skipped, with a note). Hero expression for that SQL:
 
 ```sql
 seller_product_pq >= 3 AND (l30d_orders >= 300 OR (l30d_orders >= 30 AND l30d_spend > 3000 AND profit_pct_d40_d10 > -10))

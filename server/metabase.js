@@ -30,16 +30,37 @@ export async function runCard(cardId, paramStr = '') {
   const base = (process.env.METABASE_URL || '').replace(/\/+$/, '');
   const key = process.env.METABASE_API_KEY;
   if (!base || !key) throw new Error('METABASE_URL and METABASE_API_KEY must be set');
-  const res = await fetch(`${base}/api/card/${encodeURIComponent(cardId)}/query/json`, {
-    method: 'POST',
-    headers: { 'x-api-key': key, 'content-type': 'application/json' },
-    body: JSON.stringify({ format_rows: false, pivot_results: false, parameters: parseParams(paramStr) })
-  });
+  // Netlify stops a function at 10 s with a bare 504. Give up a little before that so the page gets a clear message
+  // and the rest of the sources still load.
+  const timeoutMs = Number(process.env.MB_TIMEOUT_MS || 7500);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${base}/api/card/${encodeURIComponent(cardId)}/query/json`, {
+      method: 'POST',
+      headers: { 'x-api-key': key, 'content-type': 'application/json' },
+      body: JSON.stringify({ format_rows: false, pivot_results: false, parameters: parseParams(paramStr) }),
+      signal: ctrl.signal
+    });
+    if (res.ok) {
+      const data = await res.json();
+      clearTimeout(timer);
+      return toRows(cardId, data);
+    }
+  } catch (e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') throw new Error(`Metabase Q${cardId} took longer than ${(timeoutMs / 1000).toFixed(1)} s (Netlify's limit is 10 s)`);
+    throw e;
+  }
+  clearTimeout(timer);
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`Metabase card ${cardId} returned ${res.status}: ${text.slice(0, 200)}`);
   }
-  const data = await res.json();
+}
+
+function toRows(cardId, data) {
   if (!Array.isArray(data)) {
     const hint = data && typeof data === 'object' ? ` (got keys: ${Object.keys(data).slice(0, 8).join(', ')})` : '';
     throw new Error(`Metabase card ${cardId} did not return a row list${hint}`);

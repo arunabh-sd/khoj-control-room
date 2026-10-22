@@ -75,6 +75,7 @@ async function load(pull = true) {
   ui.busy = true; ui.msg = ''; renderChrome();
   try {
     let names = [];
+    const failures = [];
     if (pull) {
       const r = await fetch('/api/sources');
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
@@ -86,15 +87,25 @@ async function load(pull = true) {
     ];
     for (let i = 0; i < names.length; i++) {
       setStep(i);
-      const r = await fetch('/api/sources/' + names[i].name, { method: 'POST' });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error || r.statusText);
-      progress.steps[i].note = body.status === 'ok' ? `${int(body.rows)} rows` : body.status === 'missing' ? 'not connected' : 'failed';
+      // One slow or failing question doesn't stop the page: it keeps that source's last good pull.
+      let note;
+      try {
+        const r = await fetch('/api/sources/' + names[i].name, { method: 'POST' });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.error || (r.status === 504 || r.status === 502 ? 'timed out' : r.statusText));
+        note = body.status === 'ok' ? `${int(body.rows)} rows` : body.status === 'missing' ? 'not connected' : body.stale ? 'failed · using last pull' : 'failed';
+        if (body.status === 'error') failures.push(`${names[i].label}: ${body.error || 'failed'}${body.stale ? ' (showing the last good pull)' : ''}`);
+      } catch (err) {
+        note = 'failed';
+        failures.push(`${names[i].label}: ${err.message}`);
+      }
+      progress.steps[i].note = note;
     }
     setStep(progress.steps.length - 1);
     const res = await fetch('/api/state');
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
     ui.data = await res.json();
+    if (failures.length) ui.msg = `Some questions didn't load: ${failures.join(' · ')}`;
   } catch (e) {
     ui.msg = 'Could not load data: ' + e.message;
   }
@@ -315,10 +326,10 @@ function logCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
-    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
+    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.stale ? chip('amber', `Last pull ${fmtDate(s.loadedAt)} · refresh failed`) : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
     <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
   </section>`;
 }

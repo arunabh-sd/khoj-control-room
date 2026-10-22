@@ -17,8 +17,18 @@ export function createApi(store) {
   const mem = {};   // warm-instance copy of the last Metabase pull per source
 
   // Runs one Metabase question now and keeps the result for every later request (until the next page load).
+  // A failed pull (timeout, Metabase error) keeps the last good pull, flagged stale, so one slow question doesn't
+  // blank the dashboard.
   async function refreshSource(name) {
     const result = await loadOne(name);
+    if (result.status === 'error') {
+      const prev = mem[name] || (store.getCache ? await store.getCache('source:' + name) : null);
+      if (prev && prev.status === 'ok') {
+        const kept = { ...prev, stale: true, error: result.error, failedAt: result.loadedAt };
+        mem[name] = kept;
+        return { ...kept, status: 'error' };
+      }
+    }
     mem[name] = result;
     if (store.setCache) await store.setCache('source:' + name, result);
     return result;
@@ -66,7 +76,7 @@ export function createApi(store) {
         loadedAt: sources.loadedAt,
         store: store.kind,
         sources: Object.fromEntries(SOURCE_NAMES.map((k) => [k, {
-          status: sources[k].status, origin: sources[k].origin, rows: sources[k].rawRows ?? sources[k].rows.length, error: sources[k].error || null,
+          status: sources[k].status, stale: !!sources[k].stale, loadedAt: sources[k].loadedAt, origin: sources[k].origin, rows: sources[k].rawRows ?? sources[k].rows.length, error: sources[k].error || null,
           columns: Object.keys(sources[k].rows[0] || {}), sample: sampleTypes(sources[k].rows)
         }]))
       },
@@ -109,7 +119,7 @@ export function createApi(store) {
     if (srcMatch && req.method === 'POST') {
       if (!SOURCE_NAMES.includes(srcMatch[1])) return json(404, { error: 'Unknown source' });
       const r = await refreshSource(srcMatch[1]);
-      return json(200, { name: srcMatch[1], status: r.status, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
+      return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
     if (p === '/api/state' && req.method === 'GET') return json(200, await buildState());
 

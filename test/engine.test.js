@@ -276,3 +276,17 @@ test('order history: new-to-ShopDeck, parent seller before/after, repeat windows
   assert.equal(w7.khoj.pct, 50);
   assert.equal(r.repeat.kinds.otherParent, 1);
 });
+
+test('universe: the lighter question (small products pre-counted with n) gives the same funnel as product rows', async () => {
+  const { compactUniverse } = await import('../server/universe.js');
+  const base = { category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees', seller_product_pq: 4 };
+  const full = [
+    { ...base, seller_id: 's', seller_product_id: 'a', khoj_product_id: 'k1', current_status: 'live', l30d_orders: 400, l30d_spend: 1, profit_pct_d40_d10: 1 },
+    { ...base, seller_id: 's', seller_product_id: 'b', l30d_orders: 2 }, { ...base, seller_id: 's', seller_product_id: 'c', l30d_orders: 3 },
+    { ...base, seller_id: 's', seller_product_id: 'd', l30d_orders: 1 }
+  ];
+  const light = [full[0], { ...base, seller_id: null, seller_product_id: null, l30d_orders: null, n: 3 }];
+  const run = (rows) => compute({ ...src([product('k1')]), universe: { status: 'ok', rows: compactUniverse(rows) } }, S, []).universe.byCat.Saree;
+  assert.deepEqual(run(light), run(full));
+  assert.equal(run(full).all, 4);
+});

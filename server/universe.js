@@ -27,9 +27,11 @@ export function compactUniverse(rows, { minPq = 3 } = {}) {
         product_title: uploaded ? undefined : r.product_title });
       continue;
     }
+    // A row can already be a count (the lighter question returns small products grouped, with n = how many).
+    const w = num(r.n) || 1;
     const key = [l2, l3, l4, uploaded, live].join('|');
     const a = agg.get(key) || { category_l2: l2, category_l3: l3, category_l4: l4, n: 0, uploaded: 0, live: 0 };
-    a.n += 1; a.uploaded += uploaded; a.live += live;
+    a.n += w; a.uploaded += uploaded * w; a.live += live * w;
     agg.set(key, a);
   }
   return out.concat([...agg.values()]);
