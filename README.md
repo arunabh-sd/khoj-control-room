@@ -29,6 +29,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_EVENTS` | `16724` (site sessions, `sql/site_sessions.sql`) |
 | `MB_Q_BENCHMARK` | `16725` (repeat benchmark, `sql/repeat_benchmark.sql`) |
 | `MB_Q_BROWSING` | Khoj buyers' browsing on ShopDeck sites (`sql/khoj_buyer_browsing.sql`) |
+| `MB_Q_PERSONALISE` | Khoj visitors' personalisation potential (`sql/visitor_personalisation.sql`) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
 3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
@@ -175,6 +176,10 @@ The order history question is `sql/customer_history_q16717.sql`.
 ### Khoj buyers' browsing (`MB_Q_BROWSING`)
 
 `sql/khoj_buyer_browsing.sql`: product pages Khoj buyers opened on ShopDeck seller sites (Khoj left out), from 30 days before their first Khoj order, one row per customer × seller × product × day. A browser is tied to a customer through `user_id` on product page, checkout, OTP and ShopDeck sign-in events. Feeds the browsing rows of "Could we have predicted the order?" and the customer timelines. Scheduled once a day.
+
+### Visitor personalisation (`MB_Q_PERSONALISE`)
+
+`sql/visitor_personalisation.sql`: every Khoj session in the last 28 days, grouped by whether the visitor is a known ShopDeck customer (user_id on Khoj events, tied to orders), whether they ordered or browsed on ShopDeck seller sites in the 30 days before, and whether the first product matched (same product, seller or test category). Needs a Metabase Text variable `khoj_products` (not required), filled by the dashboard with each Khoj product's parent seller, parent seller product and test category. The estimate gives "signal but unrelated landing" sessions the conversion of matched sessions; it is an upper bound until an A/B test.
 
 ### Fallback copy of the universe
 

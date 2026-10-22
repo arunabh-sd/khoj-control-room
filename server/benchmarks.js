@@ -422,3 +422,45 @@ export function analyseRepeatBenchmark(rows, { khojSellerId, weights }) {
     khojFromQuestion: khojOwn
   };
 }
+
+// Personalisation potential for Khoj visitors (MB_Q_PERSONALISE): Khoj sessions grouped by whether the visitor is a
+// known ShopDeck customer, had a ShopDeck order or browse in the 30 days before, and whether the landing product
+// matched it. The "if personalised" estimate gives sessions that had a signal but landed on something unrelated the
+// conversion of sessions that landed on a match (category-level match as the conservative case).
+export function analyseVisitorPersonalisation(rows) {
+  if (!rows?.length) return null;
+  const bool = (v) => v === true || v === 1 || String(v).toLowerCase() === 'true';
+  const R = rows.map((r) => ({ cat: r.landing_cat || 'Unknown', linked: bool(r.linked), signal: bool(r.has_signal), level: String(r.match_level || ''), order: bool(r.order_signal), browse: bool(r.browse_signal), s: n(r.sessions), bn: n(r.buy_now_sessions), o: n(r.order_sessions) }));
+  const sum = (list) => list.reduce((a, r) => ({ s: a.s + r.s, bn: a.bn + r.bn, o: a.o + r.o }), { s: 0, bn: 0, o: 0 });
+  const all = sum(R);
+  const stat = (key, label, list, note) => { const x = sum(list); return { key, label, note, sessions: x.s, share: pct(x.s, all.s), buyNowPct: pct(x.bn, x.s), conversionPct: pct(x.o, x.s), orders: x.o }; };
+  const LEVELS = [['same product', 'Landed on a product they had ordered or browsed'], ['same seller', 'Landed on a seller they had ordered from or browsed'], ['same category', 'Landed in a category they had ordered or browsed'], ['no match', 'Had a signal, landed on something unrelated'], ['no signal', 'Known to ShopDeck, no order or browse in 30 days'], ['not known', 'Not a known ShopDeck customer']];
+  const levels = LEVELS.map(([k, label]) => stat(k, label, R.filter((r) => r.level === k)));
+  const L = Object.fromEntries(levels.map((l) => [l.key, l]));
+  const matchedAll = stat('matched', 'Any match', R.filter((r) => ['same product', 'same seller', 'same category'].includes(r.level)));
+  const signalled = stat('signal', 'Had a ShopDeck signal in 30 days', R.filter((r) => r.signal));
+  // Uplift: "no match" sessions converting like category-matched sessions (conservative) or like any-match sessions.
+  const est = (crPct) => {
+    if (crPct === null || L['no match'].conversionPct === null) return null;
+    const extra = Math.max(0, (crPct - L['no match'].conversionPct) / 100) * L['no match'].sessions;
+    const newCr = pct(all.o + extra, all.s);
+    return { extraOrders: extra, newConversionPct: newCr, liftPct: all.o ? (extra / all.o) * 100 : null };
+  };
+  const byCat = [...new Set(R.map((r) => r.cat))].map((c) => {
+    const list = R.filter((r) => r.cat === c);
+    const m = sum(list.filter((r) => ['same product', 'same seller', 'same category'].includes(r.level))), nm = sum(list.filter((r) => r.level === 'no match')), tot = sum(list);
+    return { key: c, sessions: tot.s, conversionPct: pct(tot.o, tot.s), signalPct: pct(sum(list.filter((r) => r.signal)).s, tot.s), matchedPct: pct(m.s, tot.s), matchedCr: pct(m.o, m.s), noMatchPct: pct(nm.s, tot.s), noMatchCr: pct(nm.o, nm.s) };
+  }).sort((a, b) => b.sessions - a.sessions);
+  const bySignal = [['order', 'Ordered on ShopDeck in 30 days', (r) => r.order], ['browse', 'Browsed ShopDeck sites in 30 days (no order)', (r) => r.browse && !r.order]].map(([k, label, f]) => {
+    const list = R.filter((r) => r.signal && f(r));
+    const m = sum(list.filter((r) => ['same product', 'same seller', 'same category'].includes(r.level))), nm = sum(list.filter((r) => r.level === 'no match'));
+    return { key: k, label, sessions: sum(list).s, matchedCr: pct(m.o, m.s), noMatchCr: pct(nm.o, nm.s), matchedPct: pct(m.s, sum(list).s) };
+  });
+  return {
+    sessions: all.s, orders: all.o, conversionPct: pct(all.o, all.s), buyNowPct: pct(all.bn, all.s),
+    linkedPct: pct(sum(R.filter((r) => r.linked)).s, all.s), signalPct: signalled.share, matchedPct: matchedAll.share,
+    matchedCr: matchedAll.conversionPct, noMatchCr: L['no match'].conversionPct,
+    levels, byCat, bySignal,
+    estimate: { conservative: est(L['same category'].conversionPct), optimistic: est(matchedAll.conversionPct), personalisableSessions: L['no match'].sessions, personalisablePct: L['no match'].share }
+  };
+}

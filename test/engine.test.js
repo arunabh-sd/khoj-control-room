@@ -407,3 +407,15 @@ test('explore is product-matched: the seller-site base is weighted to Khoj sessi
   assert.equal(pps.bench, (10 * 2 + 30 * 1) / 40);                  // 1.25, not the seller's overall 1.5
   assert.equal(ev.matched.coverage, 100);
 });
+
+test('visitor personalisation: unrelated sessions take the matched conversion for the estimate', async () => {
+  const { analyseVisitorPersonalisation } = await import('../server/benchmarks.js');
+  const row = (match_level, sessions, order_sessions, extra = {}) => ({ landing_cat: 'Saree', linked: match_level !== 'not known', has_signal: !['no signal', 'not known'].includes(match_level), match_level, order_signal: true, browse_signal: false, sessions, buy_now_sessions: 0, order_sessions, ...extra });
+  const V = analyseVisitorPersonalisation([
+    row('same category', 100, 4), row('no match', 200, 2), row('no signal', 300, 3), row('not known', 400, 2)
+  ]);
+  assert.equal(V.sessions, 1000);
+  assert.ok(Math.abs(V.conversionPct - 1.1) < 1e-9);
+  assert.ok(Math.abs(V.estimate.conservative.extraOrders - 6) < 1e-9);   // 200 × (4% − 1%)
+  assert.ok(Math.abs(V.estimate.conservative.newConversionPct - 1.7) < 1e-9);
+});

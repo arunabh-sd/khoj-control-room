@@ -52,15 +52,28 @@ export function createApi(store) {
   // A failed pull (timeout, Metabase error) keeps the last good pull, flagged stale, so one slow question doesn't
   // blank the dashboard.
   // Phase-2 questions are asked about Khoj and the parent sellers of what Khoj has sold.
-  async function phase2Params() {
+  async function phase2Params(name) {
     const settings = mergeSettings(await store.getSettings());
     const [history, products] = [await getSource('history'), await getSource('products')];
     const idx = buildProductIndex(products.rows || [], settings);
+    if (name === 'personalise') {
+      // Khoj products → parent seller, parent seller product, test category. Live products plus anything Khoj has
+      // sold or had sessions on.
+      const universe = await getSource('universe');
+      const k2s = new Map();
+      for (const r of universe.rows || []) if (r.khoj_product_id && r.seller_product_id) k2s.set(String(r.khoj_product_id), String(r.seller_product_id));
+      const wanted = new Set(idx.products.filter((p) => p.live).map((p) => p.id));
+      for (const x of history.rows || []) if (x.s === settings.khojSellerId && idx.byId.has(x.p)) wanted.add(x.p);
+      const ev = mem.events || (await getKV('source:events'));
+      for (const r of ev?.rows || []) if (String(r.seller_id) === settings.khojSellerId && r.landing_product && idx.byId.has(String(r.landing_product))) wanted.add(String(r.landing_product));
+      const clean = (s) => String(s || '').replace(/[|;]/g, ' ');
+      return { khoj_products: [...wanted].map((id) => { const p = idx.byId.get(id); return [id, p.seller, k2s.get(id) || '', p.cat].map(clean).join('|'); }).join(';') };
+    }
     return { parent_sellers: parentSellerList(khojOrderWeights(history.rows || [], settings.khojSellerId, idx)).join(',') };
   }
 
   async function refreshSource(name, opts = {}) {
-    if (PHASE[name] === 2 && !opts.params) opts = { ...opts, params: await phase2Params() };
+    if (PHASE[name] === 2 && !opts.params) opts = { ...opts, params: await phase2Params(name) };
     const result = await loadOne(name, opts);
     if (result.status === 'error') {
       const prev = mem[name] || (await getKV('source:' + name));

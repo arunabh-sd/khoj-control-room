@@ -18,6 +18,7 @@ const SOURCES = {
   // Phase 2: asked about Khoj plus the parent sellers of Khoj's ordered products (passed as {{parent_sellers}}),
   // so they run after products and order history, at half past the hour.
   events: { env: 'MB_Q_EVENTS', file: 'events.csv', label: 'Site sessions: Khoj vs parent sellers', everyHours: 24, phase: 2 },
+  personalise: { env: 'MB_Q_PERSONALISE', file: 'personalise.csv', label: 'Khoj visitors: personalisation potential', everyHours: 24, phase: 2 },
   benchmark: { env: 'MB_Q_BENCHMARK', file: 'benchmark.csv', label: 'Repeat benchmark: parent sellers', everyHours: 24, phase: 2 },
   // Phase 3: the heaviest question gets its own scheduled function, so if it runs out of time it can't take the
   // others down with it.

@@ -137,7 +137,7 @@ function renderChrome() {
       else if (s.fallback) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: using the copy in the repo (export from ${esc(fmtWhen(s.loadedAt))}) until Metabase delivers a fresh one (${esc(s.error || '')}).</div>`);
       else if (s.stale) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> didn't refresh (${esc(s.error)}). Showing the pull from ${esc(fmtWhen(s.loadedAt))}${s.daily ? '; the scheduled pull retries within 5 minutes' : ''}.</div>`);
       else if (s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: waiting for the scheduled pull, which checks every 5 minutes.</div>`);
-      else if (s.status === 'missing' && !['universe', 'overlap', 'history', 'events', 'benchmark', 'browsing'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
+      else if (s.status === 'missing' && !['universe', 'overlap', 'history', 'events', 'benchmark', 'browsing', 'personalise'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
     }
     for (const n of d.notes) notices.push(`<div class="notice notice-amber">${esc(n)}</div>`);
     if (d.meta.store === 'memory') notices.push('<div class="notice notice-amber">No persistent store: task ticks and the decision log are kept in memory and reset on restart.</div>');
@@ -333,7 +333,7 @@ function logCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', events: 'Site sessions vs parent sellers', benchmark: 'Repeat benchmark (parent sellers)' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', events: 'Site sessions vs parent sellers', personalise: 'Visitor personalisation', benchmark: 'Repeat benchmark (parent sellers)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.fallback ? chip('amber', `Repo copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.rows ? `<a class="small" href="/api/sources/${esc(k)}.csv" download>Download the rows (CSV)</a>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
@@ -509,7 +509,7 @@ function viewAudience(d) {
     <details><summary class="small">By state (from pincode)</summary><div style="margin-top:8px">${tbl(segCols('State'), a.byState)}</div></details>`);
   const P = a.personalisation;
   const lvl = P ? P.levels : [];
-  const predict = !P ? '' : card('Personalisation potential', 'Could we have predicted the order? Personalisation potential', `Share of ${int(P.orders)} Khoj orders that the customer's earlier signals pointed to, by how specific the signal was and how recent. Earlier orders on any ShopDeck site (and earlier Khoj visits) count; browsing comes next.`, kpiRow([
+  const predict = !P ? '' : card('Personalisation potential', 'Could we have predicted the order? Personalisation potential · buyers', `Share of ${int(P.orders)} Khoj orders that the customer's earlier signals pointed to, by how specific the signal was and how recent. Earlier orders on any ShopDeck site (and earlier Khoj visits) count; browsing comes next.`, kpiRow([
     ['Predictable from the last 7 days', pc((P.browsing ? P.browsing.levels.find((x) => x.key === 'all_any') : lvl.find((x) => x.key === 'any'))?.d7, 1), P.browsing ? 'orders or browsing: same product, seller, L4 or test category' : 'from orders: same product, seller, L4 or test category'],
     ['Predictable from the last 30 days', pc((P.browsing ? P.browsing.levels.find((x) => x.key === 'all_any') : lvl.find((x) => x.key === 'any'))?.d30, 1), `${pc(P.active.d30)} of orders had any ShopDeck order in those 30 days`],
     ['Predictable from 12 months', pc(lvl.find((x) => x.key === 'any')?.d365, 1), `${pc(P.active.d365)} had any order in 12 months`],
@@ -552,7 +552,31 @@ function viewAudience(d) {
     { h: 'Bought from them before', r: 1, v: (r) => pc(r.beforePct, 1), cls: (r) => (r.beforePct > 25 ? 'bad' : '') }, { h: 'Same product before', r: 1, v: (r) => pc(r.beforeProductPct, 1) },
     { h: 'Bought from them after', r: 1, v: (r) => pc(r.afterPct, 1) }, { h: 'Any seller after', r: 1, v: (r) => pc(r.afterAnyPct, 1) }
   ], a.parentBySeller, { min: 760 }));
-  return who + predict + cross + journeys + customersCard(d) + compare + parent + (d.overlap ? overlapCard(d) : overlapMissing) + later;
+  return who + predict + visitorPersonalisationCard(d) + cross + journeys + customersCard(d) + compare + parent + (d.overlap ? overlapCard(d) : overlapMissing) + later;
+}
+
+function visitorPersonalisationCard(d) {
+  const V = d.visitorPersonalisation;
+  if (!V) return card('Personalisation potential visitors', 'Personalisation potential · visitors', 'Every Khoj session, not just buyers: if the first product had matched what the visitor ordered or browsed on ShopDeck, how much would conversion go up?', `<p class="small muted">Needs the visitor personalisation question: save sql/visitor_personalisation.sql in Metabase with a Text variable <code>khoj_products</code> (not required), and set <code>MB_Q_PERSONALISE</code> on Netlify.</p>`, chip('amber', 'Not connected'));
+  const E = V.estimate;
+  const up = (e) => (e ? `${pc(V.conversionPct, 2)} → ${pc(e.newConversionPct, 2)}` : '—');
+  return card('Personalisation potential visitors', 'Personalisation potential · visitors', `${int(V.sessions)} Khoj sessions in the last 28 days. A signal = an order or a product page browsed on a ShopDeck seller site in the 30 days before the session. Conversion = sessions with an order.`, kpiRow([
+    ['Known ShopDeck customers', pc(V.linkedPct, 1), 'sessions where the visitor could be identified'],
+    ['Had a signal in 30 days', pc(V.signalPct, 1), 'something to personalise on'],
+    ['Landed on a match', pc(V.matchedPct, 1), `converted ${pc(V.matchedCr, 2)} vs ${pc(V.noMatchCr, 2)} when unrelated`],
+    ['Conversion if personalised', up(E.conservative), E.conservative ? `+${pc(E.conservative.liftPct, 0)} orders (category match); up to ${pc(E.optimistic?.newConversionPct, 2)} at any-match rates` : 'needs matched and unmatched sessions']
+  ]) + tbl([
+    { h: 'Sessions where the visitor…', v: (r) => esc(r.label) }, { h: 'Sessions', r: 1, v: (r) => int(r.sessions) }, { h: 'Share', r: 1, v: (r) => pc(r.share, 1) },
+    { h: 'Buy-now', r: 1, v: (r) => pc(r.buyNowPct, 1) }, { h: 'Conversion', r: 1, v: (r) => pc(r.conversionPct, 2) }
+  ], V.levels, { min: 760 }) + `<div style="margin-top:4px">${tbl([
+    { h: 'Landing category', v: (r) => esc(r.key) }, { h: 'Sessions', r: 1, v: (r) => int(r.sessions) }, { h: 'Conversion', r: 1, v: (r) => pc(r.conversionPct, 2) },
+    { h: 'With a signal', r: 1, v: (r) => pc(r.signalPct) }, { h: 'Landed on a match', r: 1, v: (r) => pc(r.matchedPct) },
+    { h: 'Conversion: match', r: 1, v: (r) => pc(r.matchedCr, 2) }, { h: 'Conversion: unrelated', r: 1, v: (r) => pc(r.noMatchCr, 2) }
+  ], V.byCat, { min: 860 })}</div><div style="margin-top:4px">${tbl([
+    { h: 'Signal', v: (r) => esc(r.label) }, { h: 'Sessions', r: 1, v: (r) => int(r.sessions) }, { h: 'Landed on a match', r: 1, v: (r) => pc(r.matchedPct) },
+    { h: 'Conversion: match', r: 1, v: (r) => pc(r.matchedCr, 2) }, { h: 'Conversion: unrelated', r: 1, v: (r) => pc(r.noMatchCr, 2) }
+  ], V.bySignal, { min: 720 })}</div>
+  <p class="small muted">How the estimate works: the ${pc(E.personalisablePct, 1)} of sessions that had a signal but landed on something unrelated are given the conversion of sessions that landed in a matching category (conservative) or on any match (optimistic). It's an upper bound, not a promise: visitors who landed on a match partly chose to click an ad for something they like. An A/B test on personalised landing would give the true number.</p>`);
 }
 
 // ---------- Customer table (loaded from /api/customers when the Audience tab opens) ----------
