@@ -87,7 +87,8 @@ s AS (
 SELECT 'seller' AS kind, s.seller_id,
   CAST(NULL AS STRING) AS landing_product, CAST(NULL AS STRING) AS other_product, CAST(NULL AS STRING) AS bucket, CAST(NULL AS STRING) AS visitor_type,
   COUNT(*) AS sessions, SUM(ppo) AS ppo, SUM(products) AS products_viewed, COUNTIF(products >= 2) AS multi_product_sessions, SUM(secs) AS secs,
-  COUNTIF(bn) AS buy_now_sessions, COUNTIF(bn_products >= 2) AS multi_buy_now_sessions, COUNTIF(co) AS checkout_sessions, ANY_VALUE(o.orders) AS orders,
+  COUNTIF(bn) AS buy_now_sessions, COUNTIF(bn_products >= 2) AS multi_buy_now_sessions, COUNTIF(co) AS checkout_sessions,
+  CAST(ANY_VALUE(o.orders) AS INT64) AS orders,
   COUNTIF(visitor_type = 'new') AS new_sessions,
   SUM(IF(visitor_type = 'new', products, 0)) AS new_products_viewed,
   COUNTIF(visitor_type = 'new' AND products >= 2) AS new_multi_product_sessions,
@@ -97,31 +98,43 @@ FROM s LEFT JOIN orders o ON o.seller_id = s.seller_id
 GROUP BY s.seller_id
 
 UNION ALL
-SELECT 'landing', seller_id, landing_product, NULL, NULL, visitor_type,
+SELECT 'landing', seller_id,
+  CAST(landing_product AS STRING), CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(visitor_type AS STRING),
   COUNT(*), SUM(ppo), SUM(products), COUNTIF(products >= 2), SUM(secs),
-  COUNTIF(bn), COUNTIF(bn_products >= 2), COUNTIF(co), NULL, NULL, NULL, NULL, NULL, NULL
+  COUNTIF(bn), COUNTIF(bn_products >= 2), COUNTIF(co), CAST(NULL AS INT64),
+  CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64)
 FROM s
 GROUP BY seller_id, landing_product, visitor_type
 HAVING COUNT(*) >= 3 OR seller_id = '6aad1869bcb80ce92eb3389b'
 
 UNION ALL
-SELECT 'depth', seller_id, NULL, NULL,
-  CASE WHEN products = 1 THEN '1' WHEN products = 2 THEN '2' WHEN products <= 5 THEN '3-5' ELSE '6+' END, visitor_type,
-  COUNT(*), NULL, NULL, NULL, NULL, COUNTIF(bn), NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+SELECT 'depth', seller_id,
+  CAST(NULL AS STRING), CAST(NULL AS STRING),
+  CASE WHEN products = 1 THEN '1' WHEN products = 2 THEN '2' WHEN products <= 5 THEN '3-5' ELSE '6+' END,
+  CAST(visitor_type AS STRING),
+  COUNT(*), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64),
+  COUNTIF(bn), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64),
+  CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64)
 FROM s
-GROUP BY 2, 5, 6
+GROUP BY seller_id, 5, visitor_type
 
 UNION ALL
-SELECT 'khoj_next', seller_id, landing_product, second_product, NULL, NULL,
-  COUNT(*), NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+SELECT 'khoj_next', seller_id,
+  CAST(landing_product AS STRING), CAST(second_product AS STRING), CAST(NULL AS STRING), CAST(NULL AS STRING),
+  COUNT(*), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64),
+  CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64),
+  CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64)
 FROM s
 WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND second_product IS NOT NULL
-GROUP BY 2, 3, 4
+GROUP BY seller_id, landing_product, second_product
 
 UNION ALL
-SELECT 'khoj_click', se.seller_id, se.landing_product, b.product_id, NULL, NULL,
-  COUNT(DISTINCT se.session_id), NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+SELECT 'khoj_click', se.seller_id,
+  CAST(se.landing_product AS STRING), CAST(b.product_id AS STRING), CAST(NULL AS STRING), CAST(NULL AS STRING),
+  COUNT(DISTINCT se.session_id), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64),
+  CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64),
+  CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64)
 FROM sessions se
 JOIN buy_now b ON b.seller_id = se.seller_id AND b.session_id = se.session_id
 WHERE se.seller_id = '6aad1869bcb80ce92eb3389b'
-GROUP BY 2, 3, 4
+GROUP BY se.seller_id, se.landing_product, b.product_id
