@@ -1,4 +1,5 @@
--- Personalisation potential for Khoj visitors (last 28 days of Khoj sessions).
+-- Personalisation potential for Khoj visitors (last 14 days of Khoj sessions; signals from the 30 days before each).
+-- Windows are kept short and filtered on the raw timestamps so BigQuery only reads ~45 days of event partitions.
 -- For each Khoj session: is the visitor a known ShopDeck customer, did they order or browse on ShopDeck seller sites
 -- in the 30 days before, and did the product they landed on match that (same product, same seller, same test
 -- category)? Then buy-now and order rates by group. One row per group, so the result is small.
@@ -21,7 +22,7 @@ khoj_ppo AS (
   FROM `events.product_page_opened`
   WHERE seller_id = '6aad1869bcb80ce92eb3389b'
     AND COALESCE(session_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
-    AND DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+    AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
 ),
 sess AS (
   SELECT session_id, ANY_VALUE(visitor_id) AS visitor_id, MIN(created_at) AS start_at,
@@ -32,12 +33,12 @@ sess AS (
 bn AS (
   SELECT DISTINCT session_id FROM `blitzscale-prod-project.events.buy_now_clicked`
   WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(session_id, '') <> ''
-    AND DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+    AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
 ),
 ordered AS (
   SELECT DISTINCT session_id FROM `events.order_success_opened`
   WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(session_id, '') <> ''
-    AND DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+    AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
 ),
 -- Who is behind each Khoj visitor: user_id seen on Khoj with that visitor (product pages, ShopDeck sign-in,
 -- checkout, OTP).
@@ -47,19 +48,19 @@ khoj_users AS (
     UNION ALL
     SELECT visitor_id, user_id FROM `events.sd_sso_token_exists`
     WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
-      AND DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
     UNION ALL
     SELECT visitor_id, user_id FROM `events.sd_sso_user_details_exists`
     WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
-      AND DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
     UNION ALL
     SELECT visitor_id, user_id FROM `events.checkout_initiated`
     WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
-      AND DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
     UNION ALL
     SELECT visitor_id, user_id FROM `events.otp_verification`
     WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
-      AND DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
   )
 ),
 -- user_id → ShopDeck customer: the same id, or through an order the user placed.
@@ -67,8 +68,8 @@ user_customer AS (
   SELECT e.user_id, ANY_VALUE(oi.customer_id) AS customer_id
   FROM `events.order_success_opened` e
   JOIN `nushop.orderitems` oi ON oi.order_id = e.order_id
-  WHERE e.created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
-    AND oi.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
+  WHERE e.created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
+    AND oi.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
     AND e.user_id IN (SELECT user_id FROM khoj_users)
   GROUP BY 1
 ),
@@ -82,7 +83,7 @@ visitor_customer AS (
 sig_orders AS (
   SELECT oi.customer_id, oi.seller_id, oi.customer_product_short_id AS product_id, oi.createdat AS signal_at, oi.product_name AS name, 'order' AS kind
   FROM `nushop.orderitems` oi
-  WHERE oi.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
+  WHERE oi.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
     AND oi.seller_id != '6aad1869bcb80ce92eb3389b'
     AND oi.customer_id IN (SELECT customer_id FROM visitor_customer)
     AND COALESCE(oi.seller_last_status, '') NOT IN ('enqueued', 'invalid', 'initiated')
@@ -91,12 +92,12 @@ other_visitors AS (
   SELECT DISTINCT visitor_id, user_id FROM (
     SELECT visitor_id, user_id FROM `events.product_page_opened`
     WHERE seller_id != '6aad1869bcb80ce92eb3389b' AND COALESCE(visitor_id, '') <> ''
-      AND DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 60 DAY)
+      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
       AND user_id IN (SELECT user_id FROM visitor_customer)
     UNION ALL
     SELECT visitor_id, user_id FROM `events.sd_sso_token_exists`
     WHERE seller_id != '6aad1869bcb80ce92eb3389b' AND COALESCE(visitor_id, '') <> ''
-      AND DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 60 DAY)
+      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
       AND user_id IN (SELECT user_id FROM visitor_customer)
   )
 ),
@@ -106,13 +107,13 @@ browse0 AS (
   JOIN other_visitors ov ON ov.visitor_id = p.visitor_id
   JOIN (SELECT DISTINCT user_id, customer_id FROM visitor_customer) vc ON vc.user_id = ov.user_id
   WHERE p.seller_id != '6aad1869bcb80ce92eb3389b'
-    AND DATE(p.created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 60 DAY)
-  GROUP BY 1, 2, 3, DATE(p.created_at, 'Asia/Kolkata')
+    AND p.created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
+  GROUP BY 1, 2, 3, TIMESTAMP_TRUNC(p.created_at, DAY, 'Asia/Kolkata')
 ),
 names AS (
   SELECT customer_product_short_id AS product_id, ANY_VALUE(product_name) AS name
   FROM `nushop.orderitems`
-  WHERE createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 180 DAY)
+  WHERE createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
     AND customer_product_short_id IN (SELECT product_id FROM browse0)
   GROUP BY 1
 ),

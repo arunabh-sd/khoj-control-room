@@ -62,7 +62,10 @@ export async function runCard(cardId, paramStr = '', opts = {}) {
   clearTimeout(timer);
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`Metabase card ${cardId} returned ${res.status}: ${text.slice(0, 200)}`);
+    // Metabase wraps the database error in JSON; surface the database's own message in full.
+    let msg = text.slice(0, 200);
+    try { const j = JSON.parse(text); msg = j.error || j.message || j.via?.find((v) => v.error)?.error || msg; } catch { /* not JSON */ }
+    throw new Error(`Metabase card ${cardId} returned ${res.status}: ${String(msg).slice(0, 600)}`);
   }
 }
 

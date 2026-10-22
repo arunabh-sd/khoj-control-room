@@ -560,7 +560,7 @@ function visitorPersonalisationCard(d) {
   if (!V) return card('Personalisation potential visitors', 'Personalisation potential · visitors', 'Every Khoj session, not just buyers: if the first product had matched what the visitor ordered or browsed on ShopDeck, how much would conversion go up?', `<p class="small muted">Needs the visitor personalisation question: save sql/visitor_personalisation.sql in Metabase with a Text variable <code>khoj_products</code> (not required), and set <code>MB_Q_PERSONALISE</code> on Netlify.</p>`, chip('amber', 'Not connected'));
   const E = V.estimate;
   const up = (e) => (e ? `${pc(V.conversionPct, 2)} → ${pc(e.newConversionPct, 2)}` : '—');
-  return card('Personalisation potential visitors', 'Personalisation potential · visitors', `${int(V.sessions)} Khoj sessions in the last 28 days. A signal = an order or a product page browsed on a ShopDeck seller site in the 30 days before the session. Conversion = sessions with an order.`, kpiRow([
+  return card('Personalisation potential visitors', 'Personalisation potential · visitors', `${int(V.sessions)} Khoj sessions in the last 14 days. A signal = an order or a product page browsed on a ShopDeck seller site in the 30 days before the session. Conversion = sessions with an order.`, kpiRow([
     ['Known ShopDeck customers', pc(V.linkedPct, 1), 'sessions where the visitor could be identified'],
     ['Had a signal in 30 days', pc(V.signalPct, 1), 'something to personalise on'],
     ['Landed on a match', pc(V.matchedPct, 1), `converted ${pc(V.matchedCr, 2)} vs ${pc(V.noMatchCr, 2)} when unrelated`],
