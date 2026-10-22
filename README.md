@@ -21,6 +21,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_PRODUCTS` | `16450` |
 | `MB_Q_ADS` | `16659` |
 | `MB_Q_ADSET_MAP` | `16676` (ad set → product) |
+| `MB_Q_UNIVERSE` | ShopDeck hero universe, when it exists |
 | `MB_Q_PRODUCT_SPEND` | `16674` (product-wise spend, all campaigns) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
@@ -80,6 +81,14 @@ Product-wise, day-wise spend and GMV across every campaign, catalog included: `s
 
 Eligible products with recent Spend/GMV ≤ 30% are directional hits and go to the front of the trial queue. Never counted in Success%.
 
+### ShopDeck universe (`MB_Q_UNIVERSE`)
+
+Feeds "Universe coverage (hero)" and the Hero coverage funnel. Either counts by category (`khoj_category_l2, khoj_category_l3, khoj_category_l4, sd_products, sd_hero_products`) or one row per ShopDeck product with the category columns plus `is_hero` (or `l30d_orders, l30d_spend, profit_pct_d40_d10`, and the hero rule is applied). Until it's connected, the funnel uses products uploaded to Khoj as the universe.
+
+### Meta product breakdown (CSV upload)
+
+Product signal → "Not distributed · Meta" takes a daily CSV from Ads Manager (Breakdown → By dynamic creative element → Product ID, by Day). Columns used: Product ID (= Khoj SKU id), Day, Amount spent, Purchases conversion value. Re-uploading a day replaces it; 120 days are kept. Meta-reported GMV, so the ×0.9 correction applies.
+
 ## Rules (defaults)
 
 | Area | Rule |
@@ -87,11 +96,12 @@ Eligible products with recent Spend/GMV ≤ 30% are directional hits and go to t
 | Hero | L30D seller orders ≥ 300: all. 30–299: profit % (D40–D10) > 0 and L30D spend > ₹5,000 |
 | Test categories | Saree; Kurti & Suits (kurta sets, kurtas, maternity kurtis, salwar suits, dress material); Jewellery (women's) |
 | Early kill | At ₹1,500: CTR < 0.8% or zero add-to-carts. Zero orders after 3 × target CPP (target CPP = 30% × product AOV) |
-| Verdict at ₹7,000 | Judged on the **most recent half of spend** (at least ₹3,500), so a slow learning start or a restart after duplicating doesn't sink a product. Recent Spend/GMV ≤ 30% → graduate; 30–36% → extend (graduates as soon as recent ≤ 30%, verdict by ₹14,000); above 36% → kill. Overall Spend/GMV is shown alongside. |
+| Verdict at ₹7,000 | Judged on the **better of lifetime and recent Spend/GMV** (recent = last half of spend, at least ₹3,500), so neither a slow start nor a late dip sinks a product. ≤ 30% → graduate; 30–36% → extend (graduates as soon as recent ≤ 30%, verdict by ₹14,000); above 36% → kill. Overall Spend/GMV is shown alongside. |
 | Ladder | ₹1,000 → 1,500 → 2,250 → 3,400 → 5,000/day. After 3 days at a step: marginal Spend/GMV < 25% step up; 25–30% hold; > 30% step down (ceiling recorded) |
+| Kill review | Each closed trial that didn't graduate: Right if both lifetime and recent were above 36% and it wasn't improving; Recheck if the last half of its spend was within 36% when stopped before ₹7,000; Premature if in the 30–36% band; Wrong if at or under 30%, or it did that well after the stop. |
 | Lifecycle | 14 days above 30% Spend/GMV at the floor budget → lifecycle ended |
 | New trials | 4 live trials per test category; free slots refilled from live untested hero products: catalog hits first, then 300+ order products, then 30–299; about 15% go to control products |
-| Product signal | Eligible after ₹1,500 lifetime spend (all campaigns incl. catalog); read on the most recent half of spend (min ₹1,000): Spend/GMV ≤ 30% = directional hit (queues the product), otherwise a miss. Never counted in Success%. |
+| Product signal | Products not already in testing. Eligible after ₹1,500 lifetime spend; read on the better of lifetime and recent (last half of spend, min ₹1,000): Spend/GMV ≤ 30% = directional hit (queues the product), otherwise a miss. Never counted in Success%. |
 
 ## Local development
 

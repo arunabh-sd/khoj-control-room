@@ -259,6 +259,29 @@ export function recentWindow(t, s) {
   return { spend, gmv, from, sgmv: pct(spend, gmv), full: spend >= need && spend < t.spend };
 }
 
+// The lower of lifetime and recent Spend/GMV, and which one it was.
+export function bestOf(lifetime, recent) {
+  if (recent === null || recent === undefined) return { value: lifetime ?? null, basis: 'lifetime' };
+  if (lifetime === null || lifetime === undefined) return { value: recent, basis: 'recent' };
+  return recent < lifetime ? { value: recent, basis: 'recent' } : { value: lifetime, basis: 'lifetime' };
+}
+
+// Spend/GMV over the last `share` of a day list's spend (no rupee minimum). Used to see a trend at a point in time.
+function lastShare(days, share) {
+  const total = days.reduce((a, d) => a + d.spend, 0);
+  let sp = 0, g = 0;
+  for (let i = days.length - 1; i >= 0; i--) { sp += days[i].spend; g += days[i].gmv; if (sp >= total * share) break; }
+  return pct(sp, g);
+}
+
+// Khoj product page: https://khoj.shopdeck.com/<title-slug>/catalogue/<product id>/<sku id>
+export function productUrl(p, base) {
+  if (!p || !p.id) return null;
+  const slug = String(p.title || 'product').replace(/[^A-Za-z0-9]/g, '-');
+  const sku = p.skus && p.skus[0];
+  return `${String(base || 'https://khoj.shopdeck.com').replace(/\/+$/, '')}/${slug}/catalogue/${encodeURIComponent(p.id)}${sku ? '/' + encodeURIComponent(sku) : ''}`;
+}
+
 function decideTrial(t, s, ctx) {
   const bar = s.winBar;
   const extended = ctx.extended.has(t.id);
@@ -268,12 +291,14 @@ function decideTrial(t, s, ctx) {
   t.extended = extended;
   const rec = recentWindow(t, s);
   t.recent = rec;
-  // Verdicts use the recent window; the overall number is shown alongside.
-  const vs = rec.full ? rec.sgmv : t.sgmv;
+  // Verdicts use the better (lower) of lifetime and recent Spend/GMV, so neither a slow start nor a late dip sinks a product.
+  const best = bestOf(t.sgmv, rec.full ? rec.sgmv : null);
+  const vs = best.value;
+  t.verdictSgmv = vs; t.verdictBasis = best.basis;
   const tag = (x) => (x === null ? 'no GMV' : p0(x));
-  const why = rec.full
-    ? `recent Spend/GMV ${tag(rec.sgmv)} on the last ${inr(rec.spend)} (overall ${tag(t.sgmv)})`
-    : `Spend/GMV ${tag(t.sgmv)}`;
+  const why = !rec.full ? `Spend/GMV ${tag(t.sgmv)}`
+    : best.basis === 'recent' ? `recent Spend/GMV ${tag(rec.sgmv)} on the last ${inr(rec.spend)} (lifetime ${tag(t.sgmv)})`
+    : `lifetime Spend/GMV ${tag(t.sgmv)} (recent ${tag(rec.sgmv)})`;
   if (t.spend >= s.verdictSpend) {
     if (vs !== null && vs <= bar) return { action: 'graduate', reason: `${why}: ≤ ${bar}%` };
     if (extended) {
@@ -357,7 +382,8 @@ function decideScale(a, s) {
 // Step 2, performance: Spend/GMV over the most recent `signalWindowShare` of spend (at least `signalWindowMin`),
 // the same idea as the trial verdict window, so early days don't decide the read.
 // Accepts product_spend/spend, product_gmv/gmv, or a Spend/GMV column (fraction or percent) when GMV is missing.
-function buildCatalog(rows, idx, s, trialedIds) {
+function buildCatalog(rows, idx, s, isTested, opts = {}) {
+  const factor = opts.gmvFactor > 0 ? opts.gmvFactor : 1;
   const map = new Map();
   let minDate = null, maxDate = null;
   for (const r of rows) {
@@ -375,7 +401,7 @@ function buildCatalog(rows, idx, s, trialedIds) {
       if (ratio !== null && ratio > 0) gmv = spend / (ratio > 1.5 ? ratio / 100 : ratio);
     }
     const cur = g.byDate.get(d || '') || { date: d, spend: 0, gmv: 0 };
-    cur.spend += spend; cur.gmv += gmv || 0;
+    cur.spend += spend; cur.gmv += (gmv || 0) / factor;
     g.byDate.set(d || '', cur);
   }
   const items = [...map.values()].map((g) => {
@@ -386,17 +412,27 @@ function buildCatalog(rows, idx, s, trialedIds) {
     let rs = 0, rg = 0, from = null;
     for (let i = days.length - 1; i >= 0; i--) { rs += days[i].spend; rg += days[i].gmv; from = days[i].date; if (rs >= need) break; }
     const recentOk = rs >= need && rs < spend;
-    const sgRecent = recentOk ? pct(rs, rg) : pct(spend, gmv);
-    const read = spend < s.catalogMinSpend ? 'thin' : sgRecent !== null && sgRecent <= s.winBar ? 'hit' : 'miss';
+    const best = bestOf(pct(spend, gmv), recentOk ? pct(rs, rg) : null);
+    const read = spend < s.catalogMinSpend ? 'thin' : best.value !== null && best.value <= s.winBar ? 'hit' : 'miss';
     return {
       productId: g.product?.id || g.key, name: g.product?.title || g.key, cat: g.product?.cat || 'Other',
-      hero: !!g.product?.hero, live: !!g.product?.live, linked: !!g.product,
-      spend, gmv, lifetimeSgmv: pct(spend, gmv),
-      sgmv: sgRecent, recentSpend: recentOk ? rs : null, recentFrom: recentOk ? from : null,
-      read, trialed: g.product ? trialedIds.has(g.product.id) : false
+      hero: !!g.product?.hero, live: !!g.product?.live, linked: !!g.product, url: productUrl(g.product, s.khojBaseUrl),
+      spend, gmv, lifetimeSgmv: pct(spend, gmv), recentSgmv: recentOk ? pct(rs, rg) : null,
+      sgmv: best.value, basis: best.basis, recentSpend: recentOk ? rs : null, recentFrom: recentOk ? from : null,
+      read, trialed: g.product ? isTested(g.product) : false, days
     };
   }).sort((a, b) => b.spend - a.spend);
-  return { items, from: minDate, to: maxDate, unlinked: items.filter((i) => !i.linked && i.read !== 'thin').length };
+  const byProduct = new Map(items.map((i) => [i.productId, i]));
+  return { items, byProduct, from: minDate, to: maxDate, unlinked: items.filter((i) => !i.linked && i.read !== 'thin').length };
+}
+
+// Product signal counts per category, leaving out products already in testing.
+function signalSummary(sig) {
+  return TEST_CATEGORIES.concat(['Other']).map((c) => {
+    const xs = sig.items.filter((i) => i.cat === c && !i.trialed);
+    const readable = xs.filter((i) => i.read !== 'thin');
+    return { key: c, withSpend: xs.length, readable: readable.length, hits: readable.filter((i) => i.read === 'hit').length, queued: readable.filter((i) => i.read === 'hit' && i.live).length };
+  });
 }
 
 // ---------- main ----------
@@ -418,6 +454,7 @@ export function compute(src, s, history, today = todayIST()) {
     }
     if (products.length < prow.length) notes.push(`${(prow.length - products.length).toLocaleString('en-IN')} product rows have no khoj_product_id and were skipped.`);
   }
+  const coverageRows = coverage(products);
   const catAov = {};
   for (const c of CATS_ALL) {
     const ps = products.filter((p) => p.cat === c);
@@ -475,8 +512,20 @@ export function compute(src, s, history, today = todayIST()) {
   for (const a of scales) a.decision = decideScale(a, s);
 
   const trialedIds = new Set(trials.filter((t) => t.product).map((t) => t.product.id));
-  const catalog = buildCatalog(src.catalog.rows, idx, s, trialedIds);
+  // For trials still not linked to a product, treat a product as tested when its title contains every distinctive word
+  // of the trial's name. The same product is often listed by several sellers under one title: once one is tested, all are.
+  const unlinkedSigs = trials.filter((t) => !t.product).map((t) => words(t.name)).filter((w) => w.length >= 2);
+  const titleKey = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const testedTitles = new Set(trials.filter((t) => t.product).map((t) => titleKey(t.product.title)));
+  const looksTested = (p) => { const tw = new Set(words(p.title)); return unlinkedSigs.some((sig) => sig.every((w) => tw.has(w))); };
+  const isTested = (p) => trialedIds.has(p.id) || testedTitles.has(titleKey(p.title)) || looksTested(p);
+
+  // Product signal, two views: spend distributed to products by PPO (Metabase) and Meta's own product breakdown (CSV uploads).
+  const catalog = buildCatalog(src.catalog.rows, idx, s, isTested);
   if (catalog.unlinked) notes.push(`${catalog.unlinked} product(s) in the product-wise spend question with enough spend don't match a Khoj product id or SKU id in the products question.`);
+  const metaRows = src.metaUpload?.rows || [];
+  const metaSignal = buildCatalog(metaRows, idx, s, isTested, { gmvFactor: s.metaSgmvFactor });
+  if (metaSignal.unlinked) notes.push(`${metaSignal.unlinked} product(s) in the uploaded Meta product breakdown with enough spend don't match a Khoj SKU id.`);
 
   // product outcome status
   const statusOf = new Map();
@@ -559,16 +608,11 @@ export function compute(src, s, history, today = todayIST()) {
     }
   }
 
-  // For trials still not linked to a product, skip queue products whose title contains every distinctive word of the
-  // trial's name, so a product already tested isn't suggested again.
-  const unlinkedSigs = trials.filter((t) => !t.product).map((t) => words(t.name)).filter((w) => w.length >= 2);
-  // The same product is often listed by several sellers under one title: once one listing is tested, skip the rest.
-  const titleKey = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  const testedTitles = new Set(trials.filter((t) => t.product).map((t) => titleKey(t.product.title)));
-  const looksTested = (p) => { const tw = new Set(words(p.title)); return unlinkedSigs.some((sig) => sig.every((w) => tw.has(w))); };
-
-  // new trials to fill free slots
-  const catalogHit = new Map(catalog.items.filter((c) => c.read === 'hit').map((c) => [c.productId, c]));
+  // new trials to fill free slots; hits from either product signal view go first
+  const catalogHit = new Map();
+  for (const [view, list] of [['Meta breakdown', metaSignal.items], ['PPO-distributed', catalog.items]]) {
+    for (const c of list) if (c.read === 'hit' && !catalogHit.has(c.productId)) catalogHit.set(c.productId, { ...c, view });
+  }
   const everTrialed = trials.length;
   const controlEvery = s.controlShare > 0 ? Math.max(2, Math.round(100 / s.controlShare)) : Infinity;
   let pickCounter = everTrialed;
@@ -576,7 +620,7 @@ export function compute(src, s, history, today = todayIST()) {
   for (const c of TEST_CATEGORIES) {
     const running = trials.filter((t) => t.cat === c && !t.closed && ['continue', 'extend'].includes(t.decision.action)).length;
     const free = Math.max(0, s.slotsPerCategory - running);
-    const pool = products.filter((p) => p.cat === c && p.live && !trialedIds.has(p.id) && !testedTitles.has(titleKey(p.title)) && !looksTested(p));
+    const pool = products.filter((p) => p.cat === c && p.live && !isTested(p));
     const heroQ = pool.filter((p) => p.hero).map((p) => {
       const ch = catalogHit.get(p.id);
       return { p, source: ch ? 'catalog' : p.tier === 'A' ? 'tierA' : 'tierB', score: ch ? 3e9 - (ch.sgmv || 0) : p.tier === 'A' ? 2e9 + p.orders : 1e9 + (p.profit || 0) * 1000 + p.orders };
@@ -592,13 +636,13 @@ export function compute(src, s, history, today = todayIST()) {
       if (!pick) break;
       const p = pick.p;
       const ch = catalogHit.get(p.id);
-      const srcTxt = pick.source === 'catalog' ? `product signal (recent Spend/GMV ${p0(ch.sgmv)}, ${inr(ch.spend)} lifetime spend)`
+      const srcTxt = pick.source === 'catalog' ? `product signal, ${ch.view} (Spend/GMV ${p0(ch.sgmv)}, ${inr(ch.spend)} lifetime spend)`
         : pick.source === 'tierA' ? `hero, ${p.orders.toLocaleString('en-IN')} seller orders in 30 days`
         : pick.source === 'tierB' ? `hero, ${p.orders} seller orders, profit ${p.profit?.toFixed(1)}%`
         : 'control group (no seller demand proof)';
-      tasks.push({ id: `trial:${p.id}`, segment: 'trial', category: c, due: today,
+      tasks.push({ id: `trial:${p.id}`, segment: 'trial', category: c, due: today, url: productUrl(p, s.khojBaseUrl),
         title: `Start trial: ${p.title.slice(0, 90)}`,
-        detail: `Product ${p.code}. Source: ${srcTxt}. ${inr(s.trialDailyBudget)}/day, 3 statics, ad set named with ${p.code}.` });
+        detail: `Product ${p.code}, SKU ${p.skus.join(', ') || '—'}. Source: ${srcTxt}. ${inr(s.trialDailyBudget)}/day, 3 statics.` });
     }
   }
 
@@ -606,6 +650,7 @@ export function compute(src, s, history, today = todayIST()) {
   const trialRows = trials.map((t) => ({
     closed: !!t.closed, lastSpendDate: [...t.adsets.values()].map((a) => a.lastSpendDate).filter(Boolean).sort().at(-1) || null,
     id: t.id, name: t.name, product: t.product?.title || null, code: t.product?.code || null, cat: t.cat,
+    url: productUrl(t.product, s.khojBaseUrl), verdictSgmv: t.verdictSgmv ?? null, verdictBasis: t.verdictBasis || null,
     adsetCount: t.adsets.size, activeAdsetCount: t.activeAdsets.length, firstDate: t.firstDate,
     tier: t.product ? (t.product.hero ? t.product.tier : 'control') : null,
     days: t.dayCount, spend: t.spend, gmv: t.gmv, purchases: t.purchases, atc: t.atc, ctr: t.ctr, sgmv: t.sgmv,
@@ -615,26 +660,103 @@ export function compute(src, s, history, today = todayIST()) {
     action: t.decision.action, reason: t.decision.reason, watch: !!t.decision.watch, active: t.active
   }));
   const ladderRows = scales.map((a) => ({
-    id: a.id, name: a.name, product: a.product?.title || null, cat: a.cat,
+    id: a.id, name: a.name, product: a.product?.title || null, cat: a.cat, url: productUrl(a.product, s.khojBaseUrl),
     budget: a.budget, step: a.step, steps: a.steps, marginal: a.marginal, marginalNote: a.marginalNote,
     avg: a.sgmv, days: a.dayCount, daysAtStep: a.daysAtStep,
     action: a.decision.action, to: a.decision.to || null, reason: a.decision.reason
   }));
 
+  // ---------- kill review: was each closed trial's kill right? ----------
+  const killReview = trials.filter((t) => t.closed && ['killed', 'stopped'].includes(t.decision.action)).map((t) => {
+    const lastSpend = [...t.adsets.values()].map((a) => a.lastSpendDate).filter(Boolean).sort().at(-1) || null;
+    const recent = t.recent?.full ? t.recent.sgmv : null;
+    const best = bestOf(t.sgmv, recent).value;
+    const lastHalf = lastShare(t.days, 0.5);
+    // After the stop: the product's own spend and GMV across all campaigns (PPO-distributed view).
+    const sig = t.product ? catalog.byProduct.get(t.product.id) : null;
+    const after = sig ? sig.days.filter((d) => d.date && lastSpend && d.date > lastSpend) : [];
+    const aSpend = after.reduce((a, d) => a + d.spend, 0), aGmv = after.reduce((a, d) => a + d.gmv, 0);
+    const afterSgmv = pct(aSpend, aGmv);
+    let verdict, why;
+    if (best !== null && best <= s.winBar) { verdict = 'wrong'; why = `Was winning: Spend/GMV ${p0(best)} at stop`; }
+    else if (aSpend >= s.signalWindowMin && afterSgmv !== null && afterSgmv <= s.winBar) { verdict = 'wrong'; why = `Did well after the stop: ${p0(afterSgmv)} on ${inr(aSpend)}`; }
+    else if (best !== null && best <= s.retestMax) { verdict = 'premature'; why = `Was in the ${s.winBar}–${s.retestMax}% retest band (${p0(best)})`; }
+    else if (t.spend < s.verdictSpend && lastHalf !== null && lastHalf <= s.retestMax) { verdict = 'recheck'; why = `Improving when stopped: last half of spend at ${p0(lastHalf)}`; }
+    else {
+      verdict = 'right';
+      why = best === null ? 'No GMV at all' : `Spend/GMV ${p0(best)} at stop${lastHalf !== null ? `, last half ${p0(lastHalf)}` : ''}`;
+      if (aSpend > 0) why += aGmv > 0 ? `; after stop ${p0(afterSgmv)} on ${inr(aSpend)}` : `; ${inr(aSpend)} spent after stop with no GMV`;
+    }
+    return {
+      name: t.name, product: t.product?.title || null, url: productUrl(t.product, s.khojBaseUrl), cat: t.cat,
+      call: t.decision.action, stoppedOn: lastSpend, spend: t.spend, lifetime: t.sgmv, recent, lastHalf,
+      afterSpend: aSpend, afterGmv: aGmv, afterSgmv, verdict, why
+    };
+  }).sort((a, b) => String(a.stoppedOn).localeCompare(String(b.stoppedOn)));
+
+  // ---------- ShopDeck universe (optional source): all products and hero products on ShopDeck, by category ----------
+  const uRows = src.universe?.rows || [];
+  const universe = {};
+  for (const c of CATS_ALL) universe[c] = { all: 0, hero: 0 };
+  let uHasAll = false;
+  for (const r of uRows) {
+    const c = categoryOf(r);
+    const allN = num(r.sd_products) ?? num(r.products) ?? num(r.total_products);
+    const heroN = num(r.sd_hero_products) ?? num(r.hero_products);
+    if (allN !== null || heroN !== null) {
+      if (allN !== null) { universe[c].all += allN; uHasAll = true; }
+      if (heroN !== null) universe[c].hero += heroN;
+      continue;
+    }
+    // one row per ShopDeck product
+    uHasAll = true;
+    universe[c].all += 1;
+    const flag = String(r.is_hero ?? '').toLowerCase();
+    let hero = ['1', 'true', 'yes', 'y'].includes(flag);
+    if (r.is_hero === undefined) {
+      const o = num(r.l30d_orders) || 0, pr = num(r.profit_pct_d40_d10), sp = num(r.l30d_spend) || 0;
+      hero = o >= s.heroOrdersAll || (o >= s.heroOrdersMin && pr !== null && pr > s.heroMinProfitPct && sp > s.heroMinSpend);
+    }
+    if (hero) universe[c].hero += 1;
+  }
+  const hasUniverse = uRows.length > 0;
+
+  // ---------- headline numbers by category (front end sums the selected scope and all categories) ----------
+  const isWin = (a) => a === 'graduate' || a === 'graduated';
+  const isLoss = (a) => a === 'kill' || a === 'killed' || a === 'stopped';
+  const kpis = {};
+  for (const c of CATS_ALL) {
+    const cov = coverageRows.find((r) => r.key === c);
+    const ts = trials.filter((t) => t.cat === c);
+    const scalingIds = new Set();
+    for (const t of ts) if (isWin(t.decision.action)) scalingIds.add(t.product ? 'p:' + t.product.id : t.id);
+    for (const a of scales) if (a.cat === c && a.active && a.decision.action !== 'lifecycle') scalingIds.add(a.product ? 'p:' + a.product.id : a.id);
+    kpis[c] = {
+      live: cov.live, heroLive: cov.heroLive, khojHero: cov.hero,
+      universeHero: hasUniverse ? universe[c].hero : null, universeAll: hasUniverse && uHasAll ? universe[c].all : null,
+      tested: ts.length, winners: ts.filter((t) => isWin(t.decision.action)).length, losses: ts.filter((t) => isLoss(t.decision.action)).length,
+      liveTrials: ts.filter((t) => !t.closed).length,
+      scaling: scalingIds.size
+    };
+  }
+
   return {
-    today, catAov, notes,
+    today, catAov, notes, kpis, killReview,
+    universe: hasUniverse ? { byCat: universe, hasAll: uHasAll } : null,
+    metaSignal: {
+      window: { from: metaSignal.from, to: metaSignal.to },
+      uploads: src.metaUpload?.files || [],
+      items: metaSignal.items.slice(0, 300).map(({ days, ...i }) => i),
+      summary: signalSummary(metaSignal)
+    },
     activeTrialKeys: trials.filter((t) => t.active).map((t) => t.id),
-    coverage: coverage(products),
+    coverage: coverageRows,
     pipeline, bySource, queue,
     trials: trialRows, ladder: ladderRows,
     catalog: {
       window: { from: catalog.from, to: catalog.to },
-      items: catalog.items.slice(0, 300),
-      summary: TEST_CATEGORIES.concat(['Other']).map((c) => {
-        const xs = catalog.items.filter((i) => i.cat === c);
-        const readable = xs.filter((i) => i.read !== 'thin');
-        return { key: c, withSpend: xs.length, readable: readable.length, hits: readable.filter((i) => i.read === 'hit').length, queued: xs.filter((i) => i.read === 'hit' && !i.trialed).length };
-      })
+      items: catalog.items.slice(0, 300).map(({ days, ...i }) => i),
+      summary: signalSummary(catalog)
     },
     tasks, decisions
   };

@@ -27,15 +27,19 @@ create table if not exists decisions (
   reason text
 );
 create index if not exists decisions_at on decisions (at desc);
+create table if not exists kv (key text primary key, value jsonb not null, updated_at timestamptz not null default now());
 `;
 
 function memoryStore() {
+  const kv = new Map();
   const settings = {};
   const tasks = new Map();
   const decisions = [];
   return {
     kind: 'memory',
     async init() {},
+    async getKV(key) { return kv.has(key) ? structuredClone(kv.get(key)) : null; },
+    async setKV(key, value) { kv.set(key, structuredClone(value)); },
     async getSettings() { return { ...settings }; },
     async saveSettings(obj) { Object.assign(settings, obj); },
     async upsertTasks(list) {
@@ -75,6 +79,13 @@ function pgStore(url) {
   let pool;
   return {
     kind: 'postgres',
+    async getKV(key) {
+      const { rows } = await pool.query('select value from kv where key = $1', [key]);
+      return rows[0]?.value ?? null;
+    },
+    async setKV(key, value) {
+      await pool.query('insert into kv (key, value) values ($1, $2) on conflict (key) do update set value = excluded.value, updated_at = now()', [key, JSON.stringify(value)]);
+    },
     async init() {
       const { default: pg } = await import('pg');
       pool = new pg.Pool({
@@ -198,7 +209,9 @@ function blobsStore() {
     },
     async listDecisions() { return (await read('decisions', [])).sort((a, b) => (a.at < b.at ? 1 : -1)); },
     async getCache(key) { return read('cache:' + key, null); },
-    async setCache(key, value) { await write('cache:' + key, value); }
+    async setCache(key, value) { await write('cache:' + key, value); },
+    async getKV(key) { return read('kv:' + key, null); },
+    async setKV(key, value) { await write('kv:' + key, value); }
   };
 }
 

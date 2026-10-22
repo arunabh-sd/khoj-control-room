@@ -137,11 +137,38 @@ test('verdict uses the recent half of spend: a slow start does not kill a produc
   assert.equal(t.action, 'graduate');
 });
 
-test('verdict window kills a product whose recent half is still bad', () => {
+test('kills only when both lifetime and recent are bad', () => {
   const d = (date, spend, gmv) => day('a1', spend, gmv, { date });
-  const rows = [d('2026-10-04', 3500, 3500 / 0.25), d('2026-10-15', 3500, 3500 / 0.45)];
-  const r = compute(src([product('1')], rows), S, []);
+  const r = compute(src([product('1')], [d('2026-10-04', 3500, 3500 / 0.40), d('2026-10-15', 3500, 3500 / 0.45)]), S, []);
   assert.equal(r.trials[0].action, 'kill');
+});
+
+test('lifetime better than recent: verdict takes lifetime', () => {
+  const d = (date, spend, gmv) => day('a1', spend, gmv, { date });
+  const r = compute(src([product('1')], [d('2026-10-04', 3500, 3500 / 0.20), d('2026-10-15', 3500, 3500 / 0.38)]), S, []);
+  const t = r.trials[0];
+  assert.equal(t.verdictBasis, 'lifetime');
+  assert.equal(Math.round(t.verdictSgmv), 26);
+  assert.equal(t.action, 'graduate');
+});
+
+test('product link format', async () => {
+  const { productUrl } = await import('../server/engine.js');
+  assert.equal(productUrl({ id: 'ngVJlfb6', title: 'Floral Print Daily Wear Cotton Linen Saree (Pink)', skus: ['QF9ZvCv7'] }),
+    'https://khoj.shopdeck.com/Floral-Print-Daily-Wear-Cotton-Linen-Saree--Pink-/catalogue/ngVJlfb6/QF9ZvCv7');
+});
+
+test('kill review: improving when stopped is flagged, bad throughout is right', () => {
+  const d = (adset, date, spend, gmv) => day(adset, spend, gmv, { date, adset_status: undefined });
+  const rows = [
+    d('a1', '2026-10-04', 2000, 2000 / 1.2), d('a1', '2026-10-06', 2000, 2000 / 0.31),   // bad start, good finish, paused
+    d('a2', '2026-10-04', 2000, 2000 / 0.9), d('a2', '2026-10-06', 2000, 2000 / 0.8),    // bad throughout, paused
+    d('a3', '2026-10-20', 1000, 4000)                                                  // live, sets the reference date
+  ];
+  const r = compute(src([product('1'), product('2'), product('3')], rows), S, []);
+  const by = (id) => r.killReview.find((k) => k.product === 'P ' + id);
+  assert.equal(by('1').verdict, 'recheck');
+  assert.equal(by('2').verdict, 'right');
 });
 
 test('product signal: overall product spend with an accurate S/GMV column, no Meta correction', () => {

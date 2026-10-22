@@ -39,6 +39,7 @@ export const DEFAULT_SETTINGS = {
   metaSgmvFactor: 0.9,
 
   // Campaign naming
+  khojBaseUrl: 'https://khoj.shopdeck.com',
   testingMatch: 'testing',      // campaign name contains this = trial campaign
   scaleMatch: 'scale'           // campaign name contains this = scale campaign
 };
@@ -69,6 +70,7 @@ export const SETTING_LABELS = {
   signalWindowShare: ['Product signal', 'Performance window: most recent share of spend (0.5 = last half)'],
   signalWindowMin: ['Product signal', 'Performance window: at least this much recent spend (₹)'],
   metaSgmvFactor: ['Data', 'Ads question Spend/GMV correction: actual = reported × this'],
+  khojBaseUrl: ['Naming', 'Khoj site for product links'],
   testingMatch: ['Naming', 'Trial campaigns contain'],
   scaleMatch: ['Naming', 'Scale campaigns contain']
 };

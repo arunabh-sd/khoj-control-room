@@ -9,7 +9,8 @@ const SOURCES = {
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products' },
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
   catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
-  adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' }
+  adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' },
+  universe: { env: 'MB_Q_UNIVERSE', file: 'universe.csv', label: 'ShopDeck hero universe' }
 };
 export const SOURCE_NAMES = Object.keys(SOURCES);
 export const SOURCE_LABELS = Object.fromEntries(SOURCE_NAMES.map((k) => [k, SOURCES[k].label]));
