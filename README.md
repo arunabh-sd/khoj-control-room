@@ -104,7 +104,29 @@ Every ShopDeck order in the last 12 months by anyone who has ordered on Khoj, Kh
 
 Columns used: `order_id, customer_id, seller_id, customer_product_short_id, createdat, delivery_time, selling_price, quantity, payment_mode, in_house_status, seller_last_status, pincode, meta` (`first_order` in `meta` = the customer's first ever ShopDeck order). Add `category_l2, category_l3, category_l4` to cover every history line's category (otherwise the universe question supplies it where it can). On load the rows are cut to these columns; names, addresses, coordinates, AWBs and labels are dropped and never cached.
 
-**Trim the question to these columns.** Today it returns ~90 columns (12 MB for 10k rows), which is slow for a 10-second Netlify function and grows with Khoj.
+**Trim the question to these columns.** The first version returned ~90 columns (12 MB for 10k rows), too slow for a 10-second Netlify function. Trimmed version (rolling 12 months, times in IST):
+
+```sql
+WITH target_customers AS (
+  SELECT DISTINCT customer_id
+  FROM `nushop.orderitems`
+  WHERE createdat >= TIMESTAMP "2020-01-01 00:00:00Z"
+    AND seller_id = '6aad1869bcb80ce92eb3389b'            -- Khoj by ShopDeck
+    AND customer_id IS NOT NULL
+    AND COALESCE(seller_last_status, '') NOT IN ('enqueued', 'invalid', 'initiated')
+)
+SELECT
+  o.order_id, o.customer_id, o.seller_id, o.customer_product_short_id,
+  FORMAT_TIMESTAMP('%Y-%m-%d %H:%M', o.createdat, 'Asia/Kolkata')     AS createdat,
+  FORMAT_TIMESTAMP('%Y-%m-%d %H:%M', o.delivery_time, 'Asia/Kolkata') AS delivery_time,
+  o.selling_price, o.quantity, o.payment_mode, o.in_house_status, o.seller_last_status, o.pincode, o.meta
+  -- , c.category_l2, c.category_l3, c.category_l4
+FROM `nushop.orderitems` o
+JOIN target_customers t ON o.customer_id = t.customer_id
+-- LEFT JOIN <product catalogue table used by Q16457> c ON c.<seller product id> = o.customer_product_short_id
+WHERE o.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
+  AND COALESCE(o.seller_last_status, '') NOT IN ('enqueued', 'invalid', 'initiated')
+```
 
 - A Khoj order = an order on Khoj's seller id; cancelled orders are left out; RTO is of delivered + returned.
 - A visit = a buyer's orders within 30 minutes (buy-now places one order per item); a repeat is a Khoj order after that.
