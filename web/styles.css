@@ -156,3 +156,13 @@ code { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; b
 .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; align-items: start; }
 @media (max-width: 520px) { .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); } }
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.filter { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+.filter.grow { flex: 1 1 220px; }
+.filter select, .filter input { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; background: var(--surface); color: inherit; font: inherit; font-size: 14px; }
+.pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.btn[disabled] { opacity: .45; cursor: default; }
+tr.cust td { vertical-align: top; }
+tr.cust summary { cursor: pointer; }
+.timeline { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 520px; }
+.timeline li.khoj { font-weight: 500; }

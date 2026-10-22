@@ -67,12 +67,25 @@ export function compactHistory(rows) {
       pm: String(r.payment_mode || '').toLowerCase(), q, g: price * q,
       dt: parseTs(r.delivery_time), reg: stateOfPincode(r.pincode)
     };
+    if (r.product_name) row.n = String(r.product_name).trim().slice(0, 70);
+    if (r.seller_name) row.sn = String(r.seller_name).trim().slice(0, 40);
     if (/(^|,)first_order(,|$)/.test(meta)) row.ff = 1;
     const l2 = r.category_l2 ?? r.khoj_category_l2, l3 = r.category_l3 ?? r.khoj_category_l3, l4 = r.category_l4 ?? r.khoj_category_l4;
     if (l4) { row.l2 = l2; row.l3 = l3; row.l4 = l4; }
     out.push(row);
   }
   return out;
+}
+
+// Test category from a product name, for history lines with no category column: good enough to tell Saree,
+// Kurti & Suits and Jewellery apart.
+export function categoryFromName(name) {
+  const s = String(name || '').toLowerCase();
+  if (!s) return null;
+  if (/\bsar(ee|i)s?\b|saaree/.test(s)) return 'Saree';
+  if (/kurt[aiy]|salwar|anarkali|churidar|dress material|\bsuits?\b|palazzo set|co-?ord/.test(s)) return 'Kurti & Suits';
+  if (/necklace|earring|jhumk|bangle|bracelet|pendant|mangalsutra|jewel|\brings?\b|\bchains?\b|anklet|payal|nose ?pin|maang|\bkada\b|choker|\bhaar\b|kamarband|toe ring/.test(s)) return 'Jewellery';
+  return null;
 }
 
 // ---------- analysis ----------
@@ -113,7 +126,10 @@ export function analyseHistory(rows, ctx) {
   const catOfLine = (x) => {                                              // {l4, cat} of any line
     if (x.s === K) { const p = kp(x); return p ? { l4: p.l4 || null, cat: p.cat } : { l4: null, cat: null }; }
     if (x.l4) return { l4: x.l4, cat: categoryOf({ category_l2: x.l2, category_l3: x.l3, category_l4: x.l4 }) };
-    return ctx.sellerProductCat.get(x.p) || { l4: null, cat: null };
+    const u = ctx.sellerProductCat.get(x.p);
+    if (u) return u;
+    const byName = categoryFromName(x.n);
+    return { l4: null, cat: byName || (x.n ? 'Other' : null) };
   };
 
   // Per customer: lines sorted by time, split into Khoj and ShopDeck-seller lines (cancelled lines out).
@@ -239,6 +255,94 @@ export function analyseHistory(rows, ctx) {
   const fkOf = new Map(custs.map((cu) => [cu.c, cu.fk]));
   const compare = { khoj: closedRates(khojLines), shopdeck: closedRates(sdLines), shopdeckBefore: closedRates(sdLines.filter((x) => fkOf.has(x.c) && x.t < fkOf.get(x.c))) };
 
+
+  // ----- cross-category: what these buyers bought on ShopDeck before Khoj -----
+  const CATSX = ['Saree', 'Kurti & Suits', 'Jewellery', 'Other'];
+  const crossCat = [];
+  {
+    const m = new Map();
+    for (const cu of withPrior) { const k = cu.first?.cat || 'Unmatched'; (m.get(k) || m.set(k, []).get(k)).push(cu); }
+    for (const [k, cs] of m) {
+      const known = cs.filter((cu) => cu.prior.some((x) => catOfLine(x).cat));
+      const row = { key: k, buyers: cs.length, known: known.length };
+      for (const c of CATSX) row[c] = pct(known.filter((cu) => cu.prior.some((x) => catOfLine(x).cat === c)).length, known.length);
+      row.newCategory = pct(known.filter((cu) => !cu.prior.some((x) => catOfLine(x).cat === k)).length, known.length);
+      crossCat.push(row);
+    }
+    crossCat.sort((a, b) => b.buyers - a.buyers);
+  }
+
+  // ----- recency: how long before Khoj was their last ShopDeck order -----
+  const RECENCY = ['Within 7 days', '8–30 days', '31–90 days', '91+ days', 'None in 12 months'];
+  const recencyOf = (cu) => { if (!cu.prior.length) return RECENCY[4]; const d = (cu.fk - cu.prior[cu.prior.length - 1].t) / DAY; return d <= 7 ? RECENCY[0] : d <= 30 ? RECENCY[1] : d <= 90 ? RECENCY[2] : RECENCY[3]; };
+  const byRecency = groupBy(custs, recencyOf, RECENCY);
+
+  // ----- journeys: category by month before Khoj, then the Khoj category -----
+  const MONTH = (t) => new Date((t + 330) * 60000).toLocaleString('en-IN', { month: 'short', timeZone: 'UTC' });
+  const monthKey = (t) => new Date((t + 330) * 60000).toISOString().slice(0, 7);
+  const journeyOf = (cu, max = 3) => {
+    const months = new Map();
+    for (const x of cu.prior) {
+      const c = catOfLine(x).cat; if (!c) continue;
+      const k = monthKey(x.t); const m = months.get(k) || { label: MONTH(x.t), cats: new Map() };
+      m.cats.set(c, (m.cats.get(c) || 0) + 1); months.set(k, m);
+    }
+    const steps = [...months.entries()].sort().map(([, m]) => ({ label: m.label, cat: [...m.cats.entries()].sort((a, b) => b[1] - a[1])[0][0] }));
+    const collapsed = steps.filter((s, i) => i === 0 || s.cat !== steps[i - 1].cat);   // same category month after month = one step
+    return collapsed.slice(-max);
+  };
+  const patterns = new Map();
+  for (const cu of custs) {
+    const khojCat = cu.first?.cat || 'Unmatched';
+    const steps = journeyOf(cu, 2);
+    const key = (steps.length ? steps.map((s) => s.cat).join(' → ') : cu.newToSd ? 'New to ShopDeck' : 'No ShopDeck order in 12 months') + ' ⇒ Khoj: ' + khojCat;
+    const cur = patterns.get(key) || { key, buyers: 0, repeat: 0, example: null };
+    cur.buyers++; if (repeatOf(cu)) cur.repeat++;
+    if (!cur.example && steps.length) cur.example = steps.map((s) => `${s.cat} (${s.label})`).join(' → ') + ` ⇒ Khoj ${khojCat} (${MONTH(cu.fk)})`;
+    patterns.set(key, cur);
+  }
+  const journeys = [...patterns.values()].map((x) => ({ ...x, share: pct(x.buyers, N) })).sort((a, b) => b.buyers - a.buyers).slice(0, 20);
+  const sameCatAsLast = (() => {
+    const cs = custs.filter((cu) => cu.prior.length && cu.first?.cat && catOfLine(cu.prior[cu.prior.length - 1]).cat);
+    return { buyers: cs.length, pct: pct(cs.filter((cu) => catOfLine(cu.prior[cu.prior.length - 1]).cat === cu.first.cat).length, cs.length) };
+  })();
+
+  // ----- customer table: journey + a one-line read per buyer -----
+  const sellerName = new Map();
+  for (const x of rows) if (x.sn && !sellerName.has(x.s)) sellerName.set(x.s, x.sn);
+  const table = custs.map((cu) => {
+    const ps = parentSellers(cu), pp = parentProducts(cu);
+    const priorN = priorOrders(cu), priorSellers = new Set(cu.prior.map((x) => x.s)).size;
+    const priorCats = [...new Set(cu.prior.map((x) => catOfLine(x).cat).filter(Boolean))];
+    const khojCat = cu.first?.cat || null;
+    const sellerBefore = cu.prior.filter((x) => ps.has(x.s));
+    const repeatLines = cu.khoj.filter((x) => x.t - cu.fk > gap);
+    const otherAfter = new Set(cu.after.map((x) => x.s)).size;
+    const lastGap = cu.prior.length ? Math.round((cu.fk - cu.prior[cu.prior.length - 1].t) / DAY) : null;
+    const firstState = cu.firstLines.map((x) => x.st).includes('R') ? 'R' : cu.firstLines.every((x) => x.st === 'D') ? 'D' : 'O';
+    const reads = [];
+    if (cu.newToSd) reads.push('First ever ShopDeck order was on Khoj');
+    else if (!priorN) reads.push('Lapsed: no ShopDeck order in the 12 months before Khoj');
+    else if (priorN >= 4) reads.push(`Power buyer: ${priorN} ShopDeck orders from ${priorSellers} seller${priorSellers > 1 ? 's' : ''} before Khoj`);
+    if (sellerBefore.length) { const n = new Set(sellerBefore.map((x) => x.o)).size; reads.push(sellerBefore.some((x) => pp.has(x.p)) ? 'Had bought this exact product on the seller\'s own site' : `Already a customer of this seller (${n} order${n > 1 ? 's' : ''})`); }
+    if (khojCat && khojCat !== 'Other' && priorCats.length) reads.push(priorCats.includes(khojCat) ? `Already buys ${khojCat}` : `New category for them (bought ${priorCats.slice(0, 2).join(', ')} before)`);
+    if (lastGap !== null && lastGap <= 7) reads.push(lastGap === 0 ? 'Bought on ShopDeck the same day, before Khoj' : `Bought on ShopDeck ${lastGap} day${lastGap > 1 ? 's' : ''} before Khoj`);
+    if (repeatLines.length) { const rp = repeatLines.map(kp).filter(Boolean); reads.push(`Came back to Khoj${rp.some((p) => !ps.has(p.seller)) ? ' for another seller\'s product' : ''}`); }
+    else if (otherAfter) reads.push(`Since bought from ${otherAfter} other ShopDeck seller${otherAfter > 1 ? 's' : ''}, not Khoj`);
+    if (firstState === 'R') reads.push('First Khoj order returned (RTO)');
+    const steps = cu.all.filter((x) => x.st !== 'C').slice(-12).map((x) => {
+      const p = x.s === K ? kp(x) : null;
+      const sid = x.s === K ? (p?.seller || '') : x.s;
+      return { t: x.t, khoj: x.s === K, cat: catOfLine(x).cat, l4: catOfLine(x).l4, name: p ? p.title.slice(0, 70) : (x.n || null), seller: sellerName.get(sid) || (sid ? '…' + sid.slice(-6) : ''), st: x.st, g: Math.round(x.g) };
+    });
+    return {
+      id: cu.c, type: userType(cu), state: cu.reg, khojCat, firstKhoj: cu.fk, khojOrders: new Set(cu.khoj.map((x) => x.o)).size,
+      khojGmv: Math.round(cu.khoj.reduce((a, x) => a + x.g, 0)), pay: isCod(cu.firstLines[0].pm) ? 'COD' : 'Prepaid', firstState,
+      priorOrders: priorN, priorSellers, priorCats, lastGap, sellerBefore: sellerBefore.length > 0, repeat: repeatLines.length > 0, otherAfter,
+      journey: journeyOf(cu, 4).map((s) => `${s.cat} (${s.label})`).join(' → '), steps, read: reads.slice(0, 4).join(' · ')
+    };
+  }).sort((a, b) => b.firstKhoj - a.firstKhoj);
+
   const audience = {
     buyers: N, end, sinceFirst: Math.min(...custs.map((cu) => cu.fk)),
     newToSdPct: pct(custs.filter((cu) => cu.newToSd).length, N),
@@ -248,7 +352,7 @@ export function analyseHistory(rows, ctx) {
     medianPriorOrders: median(withPrior.map(priorOrders)),
     medianPriorSellers: median(withPrior.map((cu) => new Set(cu.prior.map((x) => x.s)).size)),
     byPrior, byUserType, byCategory, byState, byPayment,
-    predict: predict(withPrior), predictByCat,
+    predict: predict(withPrior), predictByCat, crossCat, byRecency, journeys, sameCatAsLast,
     parent, parentBySeller: parentBySeller.slice(0, 12),
     price, compare
   };
@@ -348,7 +452,7 @@ export function analyseHistory(rows, ctx) {
   };
 
   return {
-    audience, repeat, cross,
+    audience, repeat, cross, table,
     coverage: {
       rows: rows.length, khojLines: khojAll.length, customers: N,
       khojMatched: pct(khojAll.filter((x) => kp(x)).length, khojAll.length),

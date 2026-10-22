@@ -15,6 +15,7 @@ function sampleTypes(rows) {
 
 export function createApi(store) {
   const mem = {};   // warm-instance copy of the last Metabase pull per source
+  let customerTable = null;
 
   const istDay = (iso) => new Date(new Date(iso).getTime() + 330 * 60000).toISOString().slice(0, 10);
   const isDaily = (name) => DAILY_SOURCES.includes(name) && !process.env.DATA_DIR;
@@ -76,8 +77,15 @@ export function createApi(store) {
     const ist = new Date(new Date(iso).getTime() + 330 * 60000);
     return h >= 24 ? ist.toISOString().slice(0, 10) : `${ist.toISOString().slice(0, 10)}#${Math.floor(ist.getUTCHours() / h)}`;
   };
+  // Bump when a deploy changes what the scheduled questions need (columns, compaction): the next scheduled run then
+  // pulls every scheduled question once, whatever was pulled earlier that day.
+  const SCHEDULE_VERSION = '2026-10-22.2';
   async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false } = {}) {
     const now = new Date().toISOString();
+    if (!force && (await getKV('schedule-version')) !== SCHEDULE_VERSION) {
+      force = true;
+      await setKV('schedule-version', SCHEDULE_VERSION);
+    }
     return Promise.all(DAILY_SOURCES.map(async (name) => {
       const period = periodOf(name, now);
       const meta = await getKV('meta:' + name);
@@ -118,6 +126,11 @@ export function createApi(store) {
     const log = (await store.listDecisions()).slice(0, 300);
 
     const { decisions, activeTrialKeys, ...view } = result;
+    // The per-customer table is big; it's served on its own (/api/customers) when the Audience tab opens.
+    if (view.customers?.table) {
+      customerTable = { rows: view.customers.table, at: new Date().toISOString() };
+      view.customers = { ...view.customers, table: undefined, tableRows: view.customers.table.length };
+    }
     return {
       meta: {
         loadedAt: sources.loadedAt,
@@ -169,6 +182,10 @@ export function createApi(store) {
       return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, daily: !!r.daily, everyHours: EVERY_HOURS[srcMatch[1]] || null, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
     if (p === '/api/state' && req.method === 'GET') return json(200, await buildState());
+    if (p === '/api/customers' && req.method === 'GET') {
+      if (!customerTable) await buildState();
+      return json(200, customerTable || { rows: [] });
+    }
 
     const taskMatch = p.match(/^\/api\/tasks\/(.+)$/);
     if (taskMatch && req.method === 'POST') {

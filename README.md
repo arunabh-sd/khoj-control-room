@@ -126,7 +126,7 @@ Khoj buyers who also bought from the product's parent seller: `seller_id, produc
 
 Every ShopDeck order in the last 12 months by anyone who has ordered on Khoj, Khoj's own orders included (Khoj's seller id is under Rules → Customers). Feeds Audience intelligence, Repeat behaviour and Cross-selling.
 
-Columns used: `order_id, customer_id, seller_id, customer_product_short_id, createdat, delivery_time, selling_price, quantity, payment_mode, in_house_status, seller_last_status, pincode, meta` (`first_order` in `meta` = the customer's first ever ShopDeck order). Add `category_l2, category_l3, category_l4` to cover every history line's category (otherwise the universe question supplies it where it can). On load the rows are cut to these columns; names, addresses, coordinates, AWBs and labels are dropped and never cached.
+Columns used: `order_id, customer_id, seller_id, customer_product_short_id, createdat, delivery_time, selling_price, quantity, payment_mode, in_house_status, seller_last_status, pincode, meta, product_name, seller_name` (`first_order` in `meta` = the customer's first ever ShopDeck order). Add `category_l2, category_l3, category_l4` to cover every history line's category (otherwise the universe question supplies it where it can). On load the rows are cut to these columns; names, addresses, coordinates, AWBs and labels are dropped and never cached.
 
 **Trim the question to these columns.** The first version returned ~90 columns (12 MB for 10k rows), too slow for a 10-second Netlify function. Trimmed version (rolling 12 months, times in IST):
 
@@ -143,7 +143,8 @@ SELECT
   o.order_id, o.customer_id, o.seller_id, o.customer_product_short_id,
   FORMAT_TIMESTAMP('%Y-%m-%d %H:%M', o.createdat, 'Asia/Kolkata')     AS createdat,
   FORMAT_TIMESTAMP('%Y-%m-%d %H:%M', o.delivery_time, 'Asia/Kolkata') AS delivery_time,
-  o.selling_price, o.quantity, o.payment_mode, o.in_house_status, o.seller_last_status, o.pincode, o.meta
+  o.selling_price, o.quantity, o.payment_mode, o.in_house_status, o.seller_last_status, o.pincode, o.meta,
+  o.product_name, o.seller_name
   -- , c.category_l2, c.category_l3, c.category_l4
 FROM `nushop.orderitems` o
 JOIN target_customers t ON o.customer_id = t.customer_id

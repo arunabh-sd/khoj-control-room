@@ -313,15 +313,17 @@ test('daily sources: pulled once a day, never on page load once there is a pull'
     const again = await post('universe');
     assert.equal(again.daily, true);
     assert.equal(calls['57'], 1);                             // second page load: no Metabase call
-    assert.equal((await api.runDaily()).find((x) => x.name === 'universe').skipped, 'already pulled today');
-    assert.equal(calls['57'], 1);
-    await api.runDaily({ force: true });
+    await api.runDaily();                                     // first scheduled run after a deploy pulls everything once
     assert.equal(calls['57'], 2);
+    assert.equal((await api.runDaily()).find((x) => x.name === 'universe').skipped, 'already pulled today');
+    assert.equal(calls['57'], 2);
+    await api.runDaily({ force: true });
+    assert.equal(calls['57'], 3);
     await post('ads'); await post('ads');
     assert.equal(calls['50'], 2);                             // page-load sources pull on every load
     const state = await api.handle(new Request('http://x/api/state')).then((r) => r.json());
     assert.equal(state.meta.sources.universe.daily, true);
-    assert.equal(calls['57'], 2);
+    assert.equal(calls['57'], 3);
   } finally {
     srv.close();
     for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
