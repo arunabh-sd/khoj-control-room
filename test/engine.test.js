@@ -300,7 +300,7 @@ test('daily sources: pulled once a day, never on page load once there is a pull'
     res.end(JSON.stringify(id === '57' ? [{ seller_id: 's', seller_product_id: 'a', category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees', l30d_orders: 5 }] : []));
   });
   await new Promise((r) => srv.listen(0, r));
-  const env = { METABASE_URL: `http://localhost:${srv.address().port}`, METABASE_API_KEY: 'k', MB_Q_ADS: '50', MB_Q_UNIVERSE: '57', DATA_DIR: '' };
+  const env = { METABASE_URL: `http://localhost:${srv.address().port}`, METABASE_API_KEY: 'k', MB_Q_ADS: '50', MB_Q_UNIVERSE: '57', DATA_DIR: '', NO_BUNDLED_FALLBACK: '1' };
   const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
   Object.assign(process.env, env); delete process.env.DATA_DIR;
   try {
@@ -328,6 +328,20 @@ test('daily sources: pulled once a day, never on page load once there is a pull'
     srv.close();
     for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
+});
+
+test('universe falls back to the copy in the repo when Metabase has not delivered it', async () => {
+  const { createStore } = await import('../server/store.js');
+  const { createApi } = await import('../server/app.js');
+  const saved = { DATA_DIR: process.env.DATA_DIR, MB_Q_UNIVERSE: process.env.MB_Q_UNIVERSE };
+  delete process.env.DATA_DIR; delete process.env.MB_Q_UNIVERSE;
+  try {
+    const store = createStore(); await store.init();
+    const state = await createApi(store).handle(new Request('http://x/api/state')).then((r) => r.json());
+    assert.equal(state.meta.sources.universe.fallback, true);
+    assert.ok(state.meta.sources.universe.rows > 200000);
+    assert.ok(state.universe.byCat.Saree.all > 10000);
+  } finally { for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v; }
 });
 
 test('parent-seller benchmarks are weighted by Khoj orders', async () => {

@@ -134,7 +134,7 @@ function renderChrome() {
     for (const [k, s] of Object.entries(d.meta.sources)) {
       if (s.status === 'error' && s.daily) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: not pulled yet. The scheduled pull checks every 5 minutes (last try: ${esc(s.error)}).</div>`);
       else if (s.status === 'error') notices.push(`<div class="notice notice-orange"><strong>${esc(k)}</strong> source failed (${esc(s.origin)}): ${esc(s.error)}</div>`);
-      else if (s.fallback) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: using the uploaded copy from ${esc(fmtWhen(s.loadedAt))} until Metabase delivers a fresh one (${esc(s.error || '')}).</div>`);
+      else if (s.fallback) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: using the copy in the repo (export from ${esc(fmtWhen(s.loadedAt))}) until Metabase delivers a fresh one (${esc(s.error || '')}).</div>`);
       else if (s.stale) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> didn't refresh (${esc(s.error)}). Showing the pull from ${esc(fmtWhen(s.loadedAt))}${s.daily ? '; the scheduled pull retries within 5 minutes' : ''}.</div>`);
       else if (s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: waiting for the scheduled pull, which checks every 5 minutes.</div>`);
       else if (s.status === 'missing' && !['universe', 'overlap', 'history', 'events', 'benchmark', 'browsing'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
@@ -336,7 +336,7 @@ function sourcesCard(d) {
   const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', events: 'Site sessions vs parent sellers', benchmark: 'Repeat benchmark (parent sellers)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
-    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.fallback ? chip('amber', `Uploaded copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${k === 'universe' ? `<label class="btn" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px" for="universeFile">${ui.fbBusy ? 'Uploading…' : 'Upload a copy (CSV export of Q16457)'}</label><input type="file" id="universeFile" accept=".csv,text/csv" hidden ${ui.fbBusy ? 'disabled' : ''}><span class="muted small">Used whenever Metabase can't deliver it.</span>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
+    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.fallback ? chip('amber', `Repo copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
     <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”, except the slow ones on a schedule: products every 3 hours; universe, order history and buyer overlap once a day. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
   </section>`;
 }
@@ -776,22 +776,6 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('change', async (e) => {
-  if (e.target.id === 'universeFile') {
-    const file = e.target.files && e.target.files[0]; if (!file) return;
-    ui.fbBusy = true; ui.msg = ''; ui.note = ''; render();
-    try {
-      const { compactUniverseCsv, gzipJson } = await import('./universe-upload.js');
-      const { rows, rawRows } = compactUniverseCsv(await file.text());
-      const body = await gzipJson({ rows, rawRows, name: file.name, fileDate: new Date(file.lastModified).toISOString() });
-      const r = await fetch('/api/fallback/universe', { method: 'POST', headers: { 'content-type': 'application/gzip' }, body });
-      const res = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(res.error || r.statusText);
-      ui.note = `Universe copy uploaded: ${int(rawRows)} products from ${file.name}. It's used whenever Metabase can't deliver Q16457.`;
-    } catch (err) { ui.msg = 'Upload failed: ' + err.message; }
-    ui.fbBusy = false;
-    await load(false);
-    return;
-  }
   if (e.target.dataset && e.target.dataset.cf && e.target.dataset.cf !== 'q') { custUi[e.target.dataset.cf] = e.target.value; custUi.page = 0; $('custTable').innerHTML = custTableInner(); return; }
   if (e.target.id === 'showDone') { ui.showDone = e.target.checked; remember(); render(); return; }
   const id = e.target.dataset.task;

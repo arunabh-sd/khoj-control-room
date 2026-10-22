@@ -6,6 +6,7 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
   external_node_modules = ["pg-native"]
+  included_files = ["server/fallback/**"]
 
 [build.environment]
   NODE_VERSION = "20"

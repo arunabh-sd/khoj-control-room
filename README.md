@@ -178,7 +178,7 @@ The order history question is `sql/customer_history_q16717.sql`.
 
 ### Fallback copy of the universe
 
-If Metabase can't deliver Q16457, the dashboard uses an uploaded copy: Data sources → "Upload a copy (CSV export of Q16457)". The browser shrinks the export to the compact rows and uploads them (gzipped) to Netlify Blobs; nothing goes into the repo. A fresh Metabase pull replaces it automatically.
+`server/fallback/universe.json.gz` is a compacted copy of a Q16457 export (Oct 22). Whenever Metabase hasn't delivered Q16457, the dashboard uses it and says how old it is; a fresh pull replaces it automatically. To refresh the copy, regenerate it from a new CSV export (see the commit that added it).
 
 ## Rules (defaults)
 
