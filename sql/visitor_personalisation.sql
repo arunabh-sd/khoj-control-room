@@ -80,7 +80,7 @@ visitor_customer AS (
 ),
 -- Signals before the session: orders on ShopDeck seller sites, and product pages browsed on them.
 sig_orders AS (
-  SELECT oi.customer_id, oi.seller_id, oi.customer_product_short_id AS product_id, oi.createdat AS at, oi.product_name AS name, 'order' AS kind
+  SELECT oi.customer_id, oi.seller_id, oi.customer_product_short_id AS product_id, oi.createdat AS signal_at, oi.product_name AS name, 'order' AS kind
   FROM `nushop.orderitems` oi
   WHERE oi.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
     AND oi.seller_id != '6aad1869bcb80ce92eb3389b'
@@ -101,7 +101,7 @@ other_visitors AS (
   )
 ),
 browse0 AS (
-  SELECT vc.customer_id, p.seller_id, CAST(p.product_id AS STRING) AS product_id, MIN(p.created_at) AS at
+  SELECT vc.customer_id, p.seller_id, CAST(p.product_id AS STRING) AS product_id, MIN(p.created_at) AS signal_at
   FROM `events.product_page_opened` p
   JOIN other_visitors ov ON ov.visitor_id = p.visitor_id
   JOIN (SELECT DISTINCT user_id, customer_id FROM visitor_customer) vc ON vc.user_id = ov.user_id
@@ -117,7 +117,7 @@ names AS (
   GROUP BY 1
 ),
 sigs AS (
-  SELECT customer_id, seller_id, product_id, at, kind,
+  SELECT customer_id, seller_id, product_id, signal_at, kind,
     CASE
       WHEN REGEXP_CONTAINS(LOWER(COALESCE(name, '')), r'\bsar(ee|i)s?\b|saaree') THEN 'Saree'
       WHEN REGEXP_CONTAINS(LOWER(COALESCE(name, '')), r'kurt[aiy]|salwar|anarkali|churidar|dress material|\bsuits?\b|palazzo set|co-?ord') THEN 'Kurti & Suits'
@@ -126,9 +126,9 @@ sigs AS (
       ELSE 'Other'
     END AS cat
   FROM (
-    SELECT customer_id, seller_id, product_id, at, kind, name FROM sig_orders
+    SELECT customer_id, seller_id, product_id, signal_at, kind, name FROM sig_orders
     UNION ALL
-    SELECT b.customer_id, b.seller_id, b.product_id, b.at, 'browse', n.name FROM browse0 b LEFT JOIN names n USING (product_id)
+    SELECT b.customer_id, b.seller_id, b.product_id, b.signal_at, 'browse', n.name FROM browse0 b LEFT JOIN names n USING (product_id)
   )
 ),
 scored AS (
@@ -136,7 +136,7 @@ scored AS (
     s.session_id,
     COALESCE(kp.cat, 'Unknown') AS landing_cat,
     vc.customer_id IS NOT NULL AS linked,
-    LOGICAL_OR(g.at IS NOT NULL) AS has_signal,
+    LOGICAL_OR(g.signal_at IS NOT NULL) AS has_signal,
     LOGICAL_OR(g.kind = 'order') AS order_signal,
     LOGICAL_OR(g.kind = 'browse') AS browse_signal,
     LOGICAL_OR(g.product_id = kp.parent_product OR g.product_id = s.landing_product) AS m_product,
@@ -146,7 +146,7 @@ scored AS (
   LEFT JOIN visitor_customer vc ON vc.visitor_id = s.visitor_id
   LEFT JOIN kp ON kp.product_id = s.landing_product
   LEFT JOIN sigs g ON g.customer_id = vc.customer_id
-                  AND g.at < s.start_at AND g.at >= TIMESTAMP_SUB(s.start_at, INTERVAL 30 DAY)
+                  AND g.signal_at < s.start_at AND g.signal_at >= TIMESTAMP_SUB(s.start_at, INTERVAL 30 DAY)
   GROUP BY 1, 2, 3
 )
 SELECT
