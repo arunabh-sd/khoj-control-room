@@ -20,17 +20,33 @@ const src = (products, ads = [], catalog = []) => ({
 });
 const actionOf = (r, id) => r.trials.find((t) => t.id === 'p:' + id.replace('a', '')).action;
 
-test('hero rule: 300+ all, 30–299 needs profit > 0 and spend > 5000', () => {
+test('hero rule: 300+ all, 30–299 needs profit > -10 and spend > 3000, PQ ≥ 3 for both', () => {
   const r = compute(src([
     product('1', { l30d_orders: '300', profit_pct_d40_d10: '-20' }),
-    product('2', { l30d_orders: '30', l30d_spend: '6000', profit_pct_d40_d10: '1' }),
-    product('3', { l30d_orders: '30', l30d_spend: '5000', profit_pct_d40_d10: '1' }),
+    product('2', { l30d_orders: '30', l30d_spend: '3001', profit_pct_d40_d10: '-9' }),
+    product('3', { l30d_orders: '30', l30d_spend: '3000', profit_pct_d40_d10: '5' }),
+    product('5', { l30d_orders: '100', l30d_spend: '9000', profit_pct_d40_d10: '-10' }),
     product('4', { l30d_orders: '29' })
   ]), S, []);
   const saree = r.coverage.find((c) => c.key === 'Saree');
   assert.equal(saree.hero, 2);
   assert.equal(saree.tierA, 1);
   assert.equal(saree.tierB, 1);
+});
+
+test('hero PQ bar: Khoj products missing from the PQ ≥ 3 universe, or under it, are not hero', () => {
+  const s = src([
+    product('1', { l30d_orders: '500' }),                                         // in universe, PQ 4
+    product('2', { l30d_orders: '500' }),                                         // not in universe → under PQ 3
+    product('3', { l30d_orders: '50', l30d_spend: '9000', profit_pct_d40_d10: '0' }), // in universe, PQ 2
+    product('6', { l30d_orders: '500', seller_product_pq: '1' })                  // own PQ column wins
+  ]);
+  const u = (id, pq) => ({ category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees', n: 1, uploaded: 1, live: 1, l30d_orders: 500, l30d_spend: 9000, profit_pct_d40_d10: 0, khoj_product_id: id, pq });
+  s.universe = { status: 'ok', rows: [u('1', 4), u('3', 2), u('6', 5)] };
+  const r = compute(s, S, []);
+  const saree = r.coverage.find((c) => c.key === 'Saree');
+  assert.equal(saree.hero, 1);
+  assert.equal(r.universe.byCat.Saree.hero, 2);   // universe rows: PQ 4 and 5 qualify, PQ 2 doesn't
 });
 
 test('trial verdicts at 7k: graduate ≤ 30%, extend ≤ 36%, kill above', () => {
@@ -214,4 +230,17 @@ test('universe: product rows (Q16457 shape) and pre-aggregated rows give the sam
     const r = compute({ ...src([product('1')]), universe: { status: 'ok', rows } }, S, []);
     assert.deepEqual(r.universe.byCat.Saree, { all: 3, uploaded: 2, live: 1, hero: 2, heroUploaded: 2, heroLive: 1 });
   }
+});
+
+test('cannibalisation: seller product ids map to Khoj products through the universe', () => {
+  const universe = [{ category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees', n: 1, uploaded: 1, live: 1, l30d_orders: 400, seller_product_id: 'SP1', khoj_product_id: '1' }];
+  const overlapRows = [
+    { seller_id: 'A', product_id: 'SP1', khoj_orders: 10, khoj_buyers: 10, overlapping_buyers: 4 },
+    { seller_id: 'B', product_id: 'SP9', khoj_orders: 30, khoj_buyers: 30, overlapping_buyers: 0 }
+  ];
+  const r = compute({ ...src([product('1')]), universe: { status: 'ok', rows: universe }, overlap: { status: 'ok', rows: overlapRows } }, S, []);
+  assert.equal(Math.round(r.overlap.pct), 10);
+  assert.equal(r.overlap.unlinked, 1);
+  assert.equal(r.overlap.byCat.find((c) => c.key === 'Saree').pct, 40);
+  assert.equal(r.overlap.topSeller.id, 'B');
 });

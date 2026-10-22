@@ -119,7 +119,7 @@ function renderChrome() {
   if (d) {
     for (const [k, s] of Object.entries(d.meta.sources)) {
       if (s.status === 'error') notices.push(`<div class="notice notice-orange"><strong>${esc(k)}</strong> source failed (${esc(s.origin)}): ${esc(s.error)}</div>`);
-      else if (s.status === 'missing' && k !== 'universe') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
+      else if (s.status === 'missing' && !['universe', 'overlap'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
     }
     for (const n of d.notes) notices.push(`<div class="notice notice-amber">${esc(n)}</div>`);
     if (d.meta.store === 'memory') notices.push('<div class="notice notice-amber">No persistent store: task ticks and the decision log are kept in memory and reset on restart.</div>');
@@ -217,7 +217,7 @@ function liveCard(d, trials) {
   const color = { kill: 'var(--orange)', graduate: 'var(--green)', extend: 'var(--purple)', continue: 'var(--blue)', killed: 'var(--orange)', graduated: 'var(--green)', stopped: '#9A9CA3' };
   const bar = d.settings.winBar;
   const rows = shown.map((t) => `<tr>
-    <td><div class="prod"><span class="name">${link(t.url, t.product || t.name)}</span><span class="muted small">${esc(t.cat)}${t.code ? ' · ' + esc(t.code) : ' · not linked to a SKU'}${t.tier ? ' · ' + (t.tier === 'control' ? 'control' : 'tier ' + t.tier) : ''} · ${t.adsetCount > 1 ? t.adsetCount + ' ad sets' : '1 ad set'}${t.lastSpendDate ? ' · last spend ' + fmtDate(t.lastSpendDate) : ''}</span></div></td>
+    <td><div class="prod"><span class="name">${link(t.url, t.product || t.name)}</span><span class="muted small">${esc(t.cat)}${t.code ? ' · ' + esc(t.code) : ' · not linked to a SKU'}${t.tier ? ' · ' + (t.tier === 'control' ? 'control' : 'tier ' + t.tier) : ''}${t.sellerOverlap ? ` · <span class="${t.sellerOverlap.pct > 25 ? 'bad' : t.sellerOverlap.pct > 10 ? 'warn' : ''}" title="${t.sellerOverlap.overlap} of ${t.sellerOverlap.buyers} Khoj buyers also bought from this product's seller">${pc(t.sellerOverlap.pct)} seller overlap</span>` : ''} · ${t.adsetCount > 1 ? t.adsetCount + ' ad sets' : '1 ad set'}${t.lastSpendDate ? ' · last spend ' + fmtDate(t.lastSpendDate) : ''}</span></div></td>
     <td class="num nowrap">D${t.days}</td>
     <td><div class="num small">${inr(t.spend)} / ${inr(t.limit)}</div><div class="bar" style="margin-top:5px"><span style="width:${Math.min(100, t.spend / t.limit * 100)}%;background:${color[t.action] || 'var(--blue)'}"></span></div></td>
     <td class="r num">${int(t.purchases)}</td>
@@ -336,7 +336,7 @@ function logCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
@@ -397,7 +397,7 @@ function viewCover(d) {
     <div class="funnel" role="img" aria-label="Hero coverage funnel">${funnel}</div>
     <div class="table-box"><table style="min-width:900px"><thead><tr><th>Category</th><th class="r">Universe</th><th class="r">Live on Khoj</th><th class="r">Hero universe</th><th class="r">Hero live on Khoj</th><th class="r">Hero coverage</th><th class="r">Hero not uploaded</th><th class="r">Hero uploaded, not live</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="settings">
-      <div class="field"><span class="group-title">Hero rule</span><span>L30D seller orders ≥ ${s.heroOrdersAll}: all · ${s.heroOrdersMin}–${s.heroOrdersAll - 1}: only if profit % (D40–D10) &gt; ${s.heroMinProfitPct} and L30D spend &gt; ${inr(s.heroMinSpend)}</span></div>
+      <div class="field"><span class="group-title">Hero rule</span><span>Type 1: L30D seller orders ≥ ${s.heroOrdersAll} · Type 2: ${s.heroOrdersMin}–${s.heroOrdersAll - 1} orders with profit % (D40–D10) &gt; ${s.heroMinProfitPct}% and L30D spend &gt; ${inr(s.heroMinSpend)} · both need PQ ≥ ${s.heroMinPq}</span></div>
       <div class="field"><span class="group-title">Kurti &amp; Suits</span><span>Women's kurta sets, kurtas, maternity kurtis, salwar suits, dress material</span></div>
       <div class="field"><span class="group-title">Hero coverage</span><span>Hero live on Khoj ÷ hero universe: the share of ShopDeck's hero products (PQ ≥ 3) that are live on Khoj. "Hero not uploaded" and "Hero uploaded, not live" are the two backlogs.</span></div>
     </div>
@@ -439,14 +439,42 @@ function planned(title, intro, sections, needs) {
 const ORDERS = ['Khoj orders (one row per order item)', 'order_id, order_date, customer_id (hashed phone), khoj_product_id, sku_id, seller_id, quantity, item_gmv, payment_mode, order_status, delivered_date, city, state, pincode, utm_content (ad id)'];
 const HISTORY = ['ShopDeck purchase history of those customers', 'customer_id, seller_id, order_date, product_id, product_title, category_l4, item_gmv, payment_mode, order_status'];
 
-function viewAudience() {
-  return planned('Audience intelligence', 'Who buys on Khoj, what their ShopDeck history said about them, and whether we could have predicted the purchase', [
+function overlapCard(d) {
+  const o = d.overlap;
+  const tone = (x) => (x === null ? 'muted' : x > 25 ? 'bad' : x > 10 ? 'warn' : 'good');
+  const tbl = (rows, head, nameOf, short) => `<div class="table-box"><table><thead><tr><th>${head}</th><th class="r">Khoj buyers</th><th class="r">${short ? 'Also seller' : 'Also bought from the seller'}</th><th class="r">Overlap</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${nameOf(r)}</td><td class="r num">${int(r.buyers)}</td><td class="r num">${int(r.overlap)}</td><td class="r num ${tone(r.pct)}">${pc(r.pct, 1)}</td></tr>`).join('')}</tbody></table></div>`;
+  const shortId = (id) => esc(String(id).slice(-6));
+  const cards = [
+    ['Seller overlap', pc(o.pct, 1), `${int(o.overlap)} of ${int(o.buyers)} Khoj buyers also bought from the product's own seller`],
+    ['Without the top seller', pc(o.pctExTop, 1), o.topSeller ? `seller …${String(o.topSeller.id).slice(-6)} is ${pc(o.topSeller.shareOfOverlap)} of all overlap (${pc(o.topSeller.pct, 1)} of its buyers)` : ''],
+    ['Products', int(o.products), `${int(o.sellers)} sellers · ${int(o.orders)} Khoj orders`]
+  ];
+  const prods = o.topProducts.map((x) => `<tr><td><div class="prod"><span class="name">${link(x.url, x.name)}</span><span class="muted small">${esc(x.cat)} · seller …${shortId(x.sellerId)}${x.tested ? ' · in testing' : ''}</span></div></td><td class="r num">${int(x.buyers)}</td><td class="r num">${int(x.overlap)}</td><td class="r num ${tone(x.pct)}">${pc(x.pct, 1)}</td></tr>`).join('');
+  return `<section class="card" aria-label="Cannibalisation">
+    <div class="card-head"><div><h2 style="font-size:20px">Cannibalisation · Khoj × parent seller</h2><span class="muted small">Khoj buyers who also bought from the seller whose product they bought on Khoj · ${esc(d.meta.sources.overlap.origin)}</span></div>${chip('green', 'Live')}</div>
+    <div class="kpis">${cards.map(([l, v, x]) => `<div class="kpi"><span class="label">${l}</span><span class="value num">${v}</span><span class="sub">${esc(x)}</span></div>`).join('')}</div>
+    <div class="grid-3">
+      ${tbl(o.byCat, 'Category', (r) => esc(r.key), true)}
+      ${tbl(o.byHero, 'Product', (r) => esc(r.key), true)}
+      ${tbl(o.bySellerSize, 'Seller orders', (r) => esc(r.key), true)}
+    </div>
+    <div><div class="group-title">Products by Khoj buyers</div><div class="table-box" style="margin-top:8px"><table style="min-width:700px"><thead><tr><th>Product</th><th class="r">Khoj buyers</th><th class="r">Also bought from the seller</th><th class="r">Overlap</th></tr></thead><tbody>${prods}</tbody></table></div></div>
+    <div><div class="group-title">Sellers by Khoj buyers</div><div style="margin-top:8px">${tbl(o.bySeller, 'Seller', (r) => `<span class="num">${esc(r.key)}</span> <span class="muted small">· ${r.products} products</span>`)}</div></div>
+    ${o.unlinked ? `<p class="small muted">${o.unlinked} product(s) couldn't be matched to a Khoj product (usually PQ under 3, so not in the universe question); they count in the totals but show the seller product id.</p>` : ''}
+  </section>`;
+}
+
+function viewAudience(d) {
+  const sections = [
     ['Could we have predicted it?', ['Share of Khoj buyers whose ShopDeck history contains the bought category (L4)', 'Backtest a history-based recommender: hit@1 and hit@5 at category and product level', 'Lift over a "top hero products" baseline']],
     ['Next-best product per customer', ['Top 5 hero products per customer from category affinity, price band and hero rank', 'Export lists as Meta custom audiences per product or category']],
     ['Customer journey table', ['One row per customer: first ShopDeck order, ShopDeck orders and sellers, last category, Khoj orders, days since last ShopDeck order, price paid on ShopDeck vs Khoj', 'Filters: category, city tier, state, user type, payment mode, order status, date']],
     ['Demographics', ['Gender, age group, city tier, state, city', 'ShopDeck user type: new to ShopDeck, medium, power user']],
-    ['Also worth tracking', ['New to ShopDeck share: buyers who never bought from a ShopDeck seller', 'Cannibalisation: bought the same product on the seller\'s own site before', 'Price paid on Khoj vs on the seller site', 'COD share and RTO rate by segment', 'Which campaigns and seeds bring which segments, and at what Spend/GMV', 'Days from first click to purchase; device and time of day']]
-  ], [ORDERS, HISTORY, ['Customer profile', 'customer_id, gender, age_group, city_tier, first_sd_order_date, sd_orders_lifetime, sd_sellers_lifetime']]);
+    ['Also worth tracking', ['New to ShopDeck share: buyers who never bought from a ShopDeck seller', 'Price paid on Khoj vs on the seller site', 'COD share and RTO rate by segment', 'Which campaigns and seeds bring which segments, and at what Spend/GMV', 'Days from first click to purchase; device and time of day']]
+  ];
+  const plan = planned('Audience intelligence', 'Who buys on Khoj, what their ShopDeck history said about them, and whether we could have predicted the purchase', sections, [ORDERS, HISTORY, ['Customer profile', 'customer_id, gender, age_group, city_tier, first_sd_order_date, sd_orders_lifetime, sd_sellers_lifetime']]);
+  const overlapMissing = `<section class="card"><div class="card-head"><h2>Cannibalisation · Khoj × parent seller</h2>${chip('amber', 'Not connected')}</div><p class="small muted">Set <code>MB_Q_OVERLAP</code> to the overlap question (Q16494).</p></section>`;
+  return (d.overlap ? overlapCard(d) : overlapMissing) + plan;
 }
 
 function viewCross() {

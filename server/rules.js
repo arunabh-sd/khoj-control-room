@@ -4,8 +4,9 @@ export const DEFAULT_SETTINGS = {
   // Hero rule (seller data, last 30 days)
   heroOrdersAll: 300,           // L30D orders >= this: hero regardless of profit/spend
   heroOrdersMin: 30,            // L30D orders between this and heroOrdersAll: hero only if...
-  heroMinProfitPct: 0,          // ...profit % (D40–D10) > this
-  heroMinSpend: 5000,           // ...and L30D spend > this
+  heroMinProfitPct: -10,        // ...profit % (D40–D10) > this
+  heroMinSpend: 3000,           // ...and L30D spend > this
+  heroMinPq: 3,                 // both tiers: seller product PQ >= this
 
   // Trial protocol
   winBar: 30,                   // Spend/GMV % at or below this = winner
@@ -49,6 +50,7 @@ export const SETTING_LABELS = {
   heroOrdersMin: ['Hero', 'L30D orders: lower tier starts at'],
   heroMinProfitPct: ['Hero', 'Lower tier: profit % (D40–D10) above'],
   heroMinSpend: ['Hero', 'Lower tier: L30D spend above (₹)'],
+  heroMinPq: ['Hero', 'Both tiers: product PQ at least (read from the universe question)'],
   winBar: ['Trial', 'Winning bar: Spend/GMV % at or below'],
   retestMax: ['Trial', 'Retest band upper limit: Spend/GMV %'],
   verdictSpend: ['Trial', 'First verdict at spend (₹)'],
@@ -77,6 +79,13 @@ export const SETTING_LABELS = {
 
 export function mergeSettings(overrides) {
   const s = { ...DEFAULT_SETTINGS };
+  // Saved before the Oct 2026 hero bar (profit > -10%, spend > ₹3,000, PQ ≥ 3): old defaults saved by a Rules save or
+  // reset would otherwise pin the old bar. Edits that differ from the old defaults are kept.
+  if (overrides && !('heroMinPq' in overrides)) {
+    overrides = { ...overrides };
+    if (Number(overrides.heroMinProfitPct) === 0) delete overrides.heroMinProfitPct;
+    if (Number(overrides.heroMinSpend) === 5000) delete overrides.heroMinSpend;
+  }
   for (const [k, v] of Object.entries(overrides || {})) {
     if (!(k in DEFAULT_SETTINGS)) continue;
     const def = DEFAULT_SETTINGS[k];

@@ -18,9 +18,13 @@ export function compactUniverse(rows, { minPq = 3 } = {}) {
     const uploaded = r.khoj_product_id ? 1 : 0;
     const live = String(r.current_status || '').toLowerCase() === 'live' ? 1 : 0;
     const orders = num(r.l30d_orders) || 0;
-    if (orders >= DETAIL_MIN_ORDERS || r.is_hero !== undefined) {
+    // Detail kept for products that could be hero and for every product on Khoj (its seller product id maps other
+    // questions, like the buyer overlap one, to Khoj products).
+    if (orders >= DETAIL_MIN_ORDERS || uploaded || r.is_hero !== undefined) {
       out.push({ category_l2: l2, category_l3: l3, category_l4: l4, n: 1, uploaded, live,
-        l30d_orders: orders, l30d_spend: num(r.l30d_spend) || 0, profit_pct_d40_d10: num(r.profit_pct_d40_d10), is_hero: r.is_hero });
+        l30d_orders: orders, l30d_spend: num(r.l30d_spend) || 0, profit_pct_d40_d10: num(r.profit_pct_d40_d10), is_hero: r.is_hero, pq: pq ?? undefined,
+        seller_product_id: r.seller_product_id || undefined, khoj_product_id: r.khoj_product_id || undefined,
+        product_title: uploaded ? undefined : r.product_title });
       continue;
     }
     const key = [l2, l3, l4, uploaded, live].join('|');

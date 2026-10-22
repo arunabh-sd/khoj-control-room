@@ -89,8 +89,31 @@ function hash(s) {
   return h >>> 0;
 }
 
+// ---------- hero ----------
+// Type 1: L30D orders >= heroOrdersAll. Type 2: heroOrdersMin <= orders < heroOrdersAll, profit % > heroMinProfitPct and
+// L30D spend > heroMinSpend. Both need PQ >= heroMinPq (pq null = unknown, not gated).
+export function heroTier({ orders, spend, profit, pq }, s) {
+  if (pq !== null && pq !== undefined && pq < s.heroMinPq) return null;
+  if (orders >= s.heroOrdersAll) return 'A';
+  if (orders >= s.heroOrdersMin && profit !== null && profit > s.heroMinProfitPct && spend > s.heroMinSpend) return 'B';
+  return null;
+}
+
+// PQ per Khoj product from the universe question (product rows only). Products on Khoj that aren't in it fall under its
+// PQ floor (it only returns PQ >= 3), so they get pq 0. Empty map = no PQ information: the PQ bar can't be applied.
+function pqByKhojId(uRows) {
+  const m = new Map();   // khoj_product_id → PQ (null = in the universe, PQ not given)
+  for (const r of uRows) {
+    if (!r.khoj_product_id) continue;
+    const id = String(r.khoj_product_id), v = num(r.pq ?? r.seller_product_pq);
+    const prev = m.get(id);
+    m.set(id, v === null ? (prev ?? null) : Math.max(prev ?? v, v));
+  }
+  return m;
+}
+
 // ---------- products ----------
-function buildProducts(rows, s) {
+function buildProducts(rows, s, pqMap) {
   const products = [];
   const byId = new Map();
   const byCode = new Map();
@@ -101,9 +124,9 @@ function buildProducts(rows, s) {
     const sg = num(r.l30d_s_gmv);
     const profit = num(r.profit_pct_d40_d10);
     const gmv = sg && sg > 0 ? spend / sg : null;
-    let tier = null;
-    if (orders >= s.heroOrdersAll) tier = 'A';
-    else if (orders >= s.heroOrdersMin && profit !== null && profit > s.heroMinProfitPct && spend > s.heroMinSpend) tier = 'B';
+    const ownPq = num(r.seller_product_pq ?? r.pq);
+    const pq = ownPq !== null ? ownPq : pqMap && pqMap.size ? (pqMap.has(String(r.khoj_product_id)) ? pqMap.get(String(r.khoj_product_id)) : 0) : null;
+    const tier = heroTier({ orders, spend, profit, pq }, s);
     const p = {
       id: String(r.khoj_product_id || ''),
       code: String(r.khoj_product_code || ''),
@@ -116,6 +139,7 @@ function buildProducts(rows, s) {
       spend, orders, sgmv: sg, profit,
       rto: num(r.rto_pct_d40_d10),
       aov: gmv && orders ? gmv / orders : null,
+      pq,
       tier,
       hero: !!tier
     };
@@ -438,7 +462,10 @@ function signalSummary(sig) {
 // ---------- main ----------
 export function compute(src, s, history, today = todayIST()) {
   const notes = [];
-  const idx = buildProducts(src.products.rows, s);
+  const pqMap = pqByKhojId(src.universe?.rows || []);
+  const idx = buildProducts(src.products.rows, s, pqMap);
+  if (!pqMap.size && !(src.products.rows[0] && ('seller_product_pq' in src.products.rows[0] || 'pq' in src.products.rows[0])))
+    notes.push(`No product PQ available (universe question not loaded or aggregated), so the hero PQ ≥ ${s.heroMinPq} bar isn't applied to Khoj products.`);
   const { products } = idx;
   // Products question health: required columns present, and numbers actually parse.
   const prow = src.products.rows;
@@ -650,7 +677,7 @@ export function compute(src, s, history, today = todayIST()) {
   const trialRows = trials.map((t) => ({
     closed: !!t.closed, lastSpendDate: [...t.adsets.values()].map((a) => a.lastSpendDate).filter(Boolean).sort().at(-1) || null,
     id: t.id, name: t.name, product: t.product?.title || null, code: t.product?.code || null, cat: t.cat,
-    url: productUrl(t.product, s.khojBaseUrl), verdictSgmv: t.verdictSgmv ?? null, verdictBasis: t.verdictBasis || null,
+    url: productUrl(t.product, s.khojBaseUrl), verdictSgmv: t.verdictSgmv ?? null, verdictBasis: t.verdictBasis || null, productId: t.product?.id || null,
     adsetCount: t.adsets.size, activeAdsetCount: t.activeAdsets.length, firstDate: t.firstDate,
     tier: t.product ? (t.product.hero ? t.product.tier : 'control') : null,
     days: t.dayCount, spend: t.spend, gmv: t.gmv, purchases: t.purchases, atc: t.atc, ctr: t.ctr, sgmv: t.sgmv,
@@ -704,8 +731,7 @@ export function compute(src, s, history, today = todayIST()) {
     const flag = String(r.is_hero ?? '').toLowerCase();
     if (r.is_hero !== undefined && r.is_hero !== null && flag !== '') return ['1', 'true', 'yes', 'y'].includes(flag);
     if (r.l30d_orders === undefined) return false;
-    const o = num(r.l30d_orders) || 0, pr = num(r.profit_pct_d40_d10), sp = num(r.l30d_spend) || 0;
-    return o >= s.heroOrdersAll || (o >= s.heroOrdersMin && pr !== null && pr > s.heroMinProfitPct && sp > s.heroMinSpend);
+    return !!heroTier({ orders: num(r.l30d_orders) || 0, spend: num(r.l30d_spend) || 0, profit: num(r.profit_pct_d40_d10), pq: num(r.pq ?? r.seller_product_pq) }, s);
   };
   for (const r of uRows) {
     if (String(r.seller_id || '').toUpperCase() === 'TOTAL') continue;
@@ -730,6 +756,62 @@ export function compute(src, s, history, today = todayIST()) {
   }
   const hasUniverse = uRows.length > 0;
 
+  // ---------- cannibalisation: Khoj buyers who also bought from the product's own seller (Q16494) ----------
+  // Its product_id is the seller's product id; the universe question maps it to the Khoj product.
+  const sellerToKhoj = new Map();
+  for (const r of uRows) if (r.seller_product_id && r.khoj_product_id) sellerToKhoj.set(String(r.seller_product_id), String(r.khoj_product_id));
+  const titleBySellerProduct = new Map();
+  for (const r of uRows) if (r.seller_product_id && r.product_title) titleBySellerProduct.set(String(r.seller_product_id), r.product_title);
+  const oRows = src.overlap?.rows || [];
+  let overlap = null;
+  const overlapByProduct = new Map();
+  if (oRows.length) {
+    const items = oRows.map((r) => {
+      const spid = String(r.product_id || r.seller_product_id || '');
+      const kid = r.khoj_product_id ? String(r.khoj_product_id) : sellerToKhoj.get(spid);
+      const p = kid ? idx.byId.get(kid) : null;
+      return {
+        sellerId: String(r.seller_id || ''), sellerProductId: spid, product: p,
+        name: p?.title || titleBySellerProduct.get(spid) || spid, cat: p?.cat || 'Other',
+        orders: num(r.khoj_orders) || 0, buyers: num(r.khoj_buyers) || 0, overlap: num(r.overlapping_buyers) || 0
+      };
+    });
+    const sum = (xs, f) => xs.reduce((a, x) => a + x[f], 0);
+    const rate = (xs) => { const b = sum(xs, 'buyers'); return b ? sum(xs, 'overlap') / b * 100 : null; };
+    const group = (keyOf) => {
+      const m = new Map();
+      for (const x of items) { const k = keyOf(x); (m.get(k) || m.set(k, []).get(k)).push(x); }
+      return [...m.entries()].map(([key, xs]) => ({ key, buyers: sum(xs, 'buyers'), overlap: sum(xs, 'overlap'), pct: rate(xs), products: xs.length }))
+        .sort((a, b) => b.buyers - a.buyers);
+    };
+    const sellers = group((x) => x.sellerId);
+    const top = sellers[0];
+    const rest = items.filter((x) => x.sellerId !== top?.key);
+    for (const x of items) if (x.product) {
+      const cur = overlapByProduct.get(x.product.id) || { buyers: 0, overlap: 0 };
+      cur.buyers += x.buyers; cur.overlap += x.overlap; overlapByProduct.set(x.product.id, cur);
+    }
+    overlap = {
+      buyers: sum(items, 'buyers'), overlap: sum(items, 'overlap'), orders: sum(items, 'orders'), pct: rate(items),
+      sellers: sellers.length, products: items.length, unlinked: items.filter((x) => !x.product).length,
+      topSeller: top ? { id: top.key, buyers: top.buyers, overlap: top.overlap, pct: top.pct, shareOfOverlap: sum(items, 'overlap') ? top.overlap / sum(items, 'overlap') * 100 : null } : null,
+      pctExTop: rate(rest),
+      byCat: group((x) => x.cat),
+      byHero: group((x) => (x.product ? (x.product.hero ? 'Hero' : 'Not hero') : 'Not on Khoj list')),
+      bySellerSize: group((x) => { const o = x.product?.orders ?? 0; return o >= s.heroOrdersAll ? `${s.heroOrdersAll}+ a month` : o >= s.heroOrdersMin ? `${s.heroOrdersMin}–${s.heroOrdersAll - 1} a month` : `Under ${s.heroOrdersMin} a month`; }),
+      bySeller: sellers.slice(0, 15),
+      topProducts: [...items].sort((a, b) => b.buyers - a.buyers).slice(0, 25).map((x) => ({
+        name: x.name, url: productUrl(x.product, s.khojBaseUrl), cat: x.cat, sellerId: x.sellerId, buyers: x.buyers, overlap: x.overlap,
+        pct: x.buyers ? x.overlap / x.buyers * 100 : null, tested: x.product ? isTested(x.product) : false
+      }))
+    };
+  }
+
+  for (const r of trialRows) {
+    const o = r.productId ? overlapByProduct.get(r.productId) : null;
+    r.sellerOverlap = o && o.buyers ? { pct: o.overlap / o.buyers * 100, buyers: o.buyers, overlap: o.overlap } : null;
+  }
+
   // ---------- headline numbers by category (front end sums the selected scope and all categories) ----------
   const isWin = (a) => a === 'graduate' || a === 'graduated';
   const isLoss = (a) => a === 'kill' || a === 'killed' || a === 'stopped';
@@ -751,7 +833,7 @@ export function compute(src, s, history, today = todayIST()) {
   }
 
   return {
-    today, catAov, notes, kpis, killReview,
+    today, catAov, notes, kpis, killReview, overlap,
     universe: hasUniverse ? { byCat: universe, hasAll: true, hasStatus: uHasStatus, origin: src.universe.origin } : null,
     metaSignal: {
       window: { from: metaSignal.from, to: metaSignal.to },

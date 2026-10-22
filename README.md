@@ -24,6 +24,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_UNIVERSE` | `16457` (all ShopDeck products, PQ ≥ 3) |
 | `MB_Q_UNIVERSE_PARAMS` | `min_pq=3` (passed to the question's filters) |
 | `MB_Q_PRODUCT_SPEND` | `16674` (product-wise spend, all campaigns) |
+| `MB_Q_OVERLAP` | `16494` (Khoj × parent seller buyer overlap) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
 3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
@@ -84,9 +85,17 @@ Eligible products with recent Spend/GMV ≤ 30% are directional hits and go to t
 
 ### ShopDeck universe (`MB_Q_UNIVERSE`: Q16457)
 
-All ShopDeck products with PQ ≥ 3: `seller_id, seller_product_id, product_title, khoj_product_id, current_status, seller_product_pq, l30d_spend, l30d_orders, l30d_s_gmv, profit_pct_d40_d10, category_l1..l4`. The TOTAL row is skipped and rows under PQ 3 are dropped. The same hero rule applies. Feeds "Universe coverage (hero)" and the Hero coverage funnel: Universe → Live on Khoj → Hero universe → Hero live on Khoj, plus the two backlogs (hero not uploaded, hero uploaded but not live).
+All ShopDeck products with PQ ≥ 3: `seller_id, seller_product_id, product_title, khoj_product_id, current_status, seller_product_pq, l30d_spend, l30d_orders, l30d_s_gmv, profit_pct_d40_d10, category_l1..l4`. The TOTAL row is skipped and rows under PQ 3 are dropped. The same hero rule applies, and it is also where Khoj products get their PQ for the hero PQ bar. Feeds "Universe coverage (hero)" and the Hero coverage funnel: Universe → Live on Khoj → Hero universe → Hero live on Khoj, plus the two backlogs (hero not uploaded, hero uploaded but not live).
 
-It's ~240k rows, so it's shrunk on load (products with 10+ orders keep their numbers; the rest become counts). For speed, a question that returns counts by category is better, and the dashboard reads it as is: `category_l2, category_l3, category_l4, sd_products, uploaded, live, sd_hero_products, hero_uploaded, hero_live`. With that version the hero rule lives in the SQL, so Rules edits don't change the universe.
+It's ~240k rows, so it's shrunk on load (products with 10+ orders keep their numbers; the rest become counts). For speed, a question that returns counts by category is better, and the dashboard reads it as is: `category_l2, category_l3, category_l4, sd_products, uploaded, live, sd_hero_products, hero_uploaded, hero_live`. With that version the hero rule lives in the SQL, so Rules edits don't change the universe, and Khoj products get no PQ (the PQ bar is then skipped, with a note). Hero expression for that SQL:
+
+```sql
+seller_product_pq >= 3 AND (l30d_orders >= 300 OR (l30d_orders >= 30 AND l30d_spend > 3000 AND profit_pct_d40_d10 > -10))
+```
+
+### Buyer overlap (`MB_Q_OVERLAP`: Q16494)
+
+Khoj buyers who also bought from the product's parent seller: `seller_id, product_id, khoj_buyers, overlapping_buyers` (`product_id` = seller product id, mapped to Khoj through the universe question). Feeds Audience intelligence → Cannibalisation and the overlap tag on live trials.
 
 ### Meta product breakdown (CSV upload)
 
@@ -96,7 +105,7 @@ Product signal → "Not distributed · Meta" takes a daily CSV from Ads Manager 
 
 | Area | Rule |
 |---|---|
-| Hero | L30D seller orders ≥ 300: all. 30–299: profit % (D40–D10) > 0 and L30D spend > ₹5,000 |
+| Hero | Type 1: L30D seller orders ≥ 300. Type 2: 30–299 orders with profit % (D40–D10) > −10% and L30D spend > ₹3,000. Both need product PQ ≥ 3 (read from the universe question: a Khoj product missing from it is under PQ 3) |
 | Test categories | Saree; Kurti & Suits (kurta sets, kurtas, maternity kurtis, salwar suits, dress material); Jewellery (women's) |
 | Early kill | At ₹1,500: CTR < 0.8% or zero add-to-carts. Zero orders after 3 × target CPP (target CPP = 30% × product AOV) |
 | Verdict at ₹7,000 | Judged on the **better of lifetime and recent Spend/GMV** (recent = last half of spend, at least ₹3,500), so neither a slow start nor a late dip sinks a product. ≤ 30% → graduate; 30–36% → extend (graduates as soon as recent ≤ 30%, verdict by ₹14,000); above 36% → kill. Overall Spend/GMV is shown alongside. |
