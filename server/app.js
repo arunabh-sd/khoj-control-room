@@ -126,7 +126,7 @@ export function createApi(store) {
   };
   // Bump when a deploy changes what the scheduled questions need (columns, compaction): the next scheduled run then
   // pulls every scheduled question once, whatever was pulled earlier that day.
-  const SCHEDULE_VERSION = '2026-10-22.5';
+  const SCHEDULE_VERSION = '2026-10-22.6';
   async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false, phase = 1 } = {}) {
     const now = new Date().toISOString();
     if (!force && (await getKV('schedule-version:' + phase)) !== SCHEDULE_VERSION) {

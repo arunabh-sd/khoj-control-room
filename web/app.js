@@ -122,7 +122,7 @@ function renderChrome() {
   const d = ui.data;
   $('cats').innerHTML = ['All', ...CATS].map((c) => `<button type="button" class="pill" data-cat="${esc(c)}" aria-pressed="${c === ui.cat}">${c === 'All' ? 'All test categories' : esc(c)}</button>`).join('');
   const open = d ? d.tasks.filter((t) => !t.done && inCat(t.category)).length : 0;
-  const tabs = [['room', 'Control room', ''], ['cover', 'Hero coverage', ''], ['tasks', 'Task log', open ? `${open} open` : ''], ['audience', 'Audience intelligence', ''], ['cross', 'Cross-selling', ''], ['repeat', 'Repeat behaviour', ''], ['rules', 'Rules', '']];
+  const tabs = [['room', 'Product Testing', ''], ['cover', 'Hero coverage', ''], ['audience', 'Audience intelligence', ''], ['cross', 'Cross-selling', ''], ['repeat', 'Repeat behaviour', ''], ['rules', 'Rules', ''], ['tasks', 'Task log', open ? `${open} open` : '']];
   $('tabs').innerHTML = tabs.map(([k, l, b]) => `<button type="button" class="tab" role="tab" data-tab="${k}" aria-selected="${k === ui.tab}">${l}${b ? ' ' + chip('orange', b) : ''}</button>`).join('');
   $('refresh').disabled = ui.busy;
   if (!ui.busy) $('refresh').textContent = 'Refresh from Metabase';
@@ -156,7 +156,7 @@ function render() {
   $('view').innerHTML = `<div class="view">${view(d)}</div>`;
 }
 
-// ---------- Control room ----------
+// ---------- Product Testing ----------
 function viewRoom(d) {
   const pipe = d.pipeline.filter((p) => inCat(p.key));
   const sum = (k) => pipe.reduce((a, p) => a + p[k], 0);

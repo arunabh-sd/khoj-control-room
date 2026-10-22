@@ -4,7 +4,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 
 **Tabs**
 
-- **Control room**: headline numbers, hero pipeline and Success% (by category and by product source), live trials with the engine's decision and reason, the scale ladder, the catalog signal, the decision log and data-source health.
+- **Product Testing**: headline numbers, hero pipeline and Success% (by category and by product source), live trials with the engine's decision and reason, the scale ladder, the catalog signal, the decision log and data-source health.
 - **Hero coverage**: uploaded vs live vs hero products per test category, and the relisting backlog.
 - **Task log**: New trials to start, Kills, Scales. Tick when done; tasks also close themselves once the data shows the change (ad set paused, budget moved, trial started).
 - **Rules**: every threshold the engine uses, editable and saved to Postgres.
