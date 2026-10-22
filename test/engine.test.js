@@ -290,3 +290,40 @@ test('universe: the lighter question (small products pre-counted with n) gives t
   assert.deepEqual(run(light), run(full));
   assert.equal(run(full).all, 4);
 });
+
+test('daily sources: pulled once a day, never on page load once there is a pull', async () => {
+  const http = await import('node:http');
+  const calls = {};
+  const srv = http.createServer((req, res) => {
+    const id = req.url.split('/')[3]; calls[id] = (calls[id] || 0) + 1;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify(id === '57' ? [{ seller_id: 's', seller_product_id: 'a', category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees', l30d_orders: 5 }] : []));
+  });
+  await new Promise((r) => srv.listen(0, r));
+  const env = { METABASE_URL: `http://localhost:${srv.address().port}`, METABASE_API_KEY: 'k', MB_Q_PRODUCTS: '50', MB_Q_UNIVERSE: '57', DATA_DIR: '' };
+  const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, env); delete process.env.DATA_DIR;
+  try {
+    const { createStore } = await import('../server/store.js');
+    const { createApi } = await import('../server/app.js');
+    const store = createStore(); await store.init();
+    const api = createApi(store);
+    const post = (n) => api.handle(new Request('http://x/api/sources/' + n, { method: 'POST' })).then((r) => r.json());
+    assert.equal((await post('universe')).status, 'ok');     // never pulled: the page pulls once
+    const again = await post('universe');
+    assert.equal(again.daily, true);
+    assert.equal(calls['57'], 1);                             // second page load: no Metabase call
+    assert.equal((await api.runDaily()).find((x) => x.name === 'universe').skipped, 'already pulled today');
+    assert.equal(calls['57'], 1);
+    await api.runDaily({ force: true });
+    assert.equal(calls['57'], 2);
+    await post('products'); await post('products');
+    assert.equal(calls['50'], 2);                             // normal sources pull on every load
+    const state = await api.handle(new Request('http://x/api/state')).then((r) => r.json());
+    assert.equal(state.meta.sources.universe.daily, true);
+    assert.equal(calls['57'], 2);
+  } finally {
+    srv.close();
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
+});

@@ -1,6 +1,6 @@
 // Platform-neutral API: a function from a web-standard Request to a Response.
 // Used by the Netlify Function (netlify/functions/api.mjs) and by the local Node server (server/index.js).
-import { loadOne, SOURCE_NAMES, SOURCE_LABELS } from './sources.js';
+import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES } from './sources.js';
 import { compute, todayIST } from './engine.js';
 import { DEFAULT_SETTINGS, SETTING_LABELS, mergeSettings } from './rules.js';
 
@@ -16,13 +16,18 @@ function sampleTypes(rows) {
 export function createApi(store) {
   const mem = {};   // warm-instance copy of the last Metabase pull per source
 
-  // Runs one Metabase question now and keeps the result for every later request (until the next page load).
+  const istDay = (iso) => new Date(new Date(iso).getTime() + 330 * 60000).toISOString().slice(0, 10);
+  const isDaily = (name) => DAILY_SOURCES.includes(name) && !process.env.DATA_DIR;
+  const getKV = async (k) => (store.getCache ? store.getCache(k) : store.getKV ? store.getKV('cache:' + k) : null);
+  const setKV = async (k, v) => { if (store.setCache) await store.setCache(k, v); else if (store.setKV) await store.setKV('cache:' + k, v); };
+
+  // Runs one Metabase question now and keeps the result for every later request.
   // A failed pull (timeout, Metabase error) keeps the last good pull, flagged stale, so one slow question doesn't
   // blank the dashboard.
-  async function refreshSource(name) {
-    const result = await loadOne(name);
+  async function refreshSource(name, opts = {}) {
+    const result = await loadOne(name, opts);
     if (result.status === 'error') {
-      const prev = mem[name] || (store.getCache ? await store.getCache('source:' + name) : null);
+      const prev = mem[name] || (await getKV('source:' + name));
       if (prev && prev.status === 'ok') {
         const kept = { ...prev, stale: true, error: result.error, failedAt: result.loadedAt };
         mem[name] = kept;
@@ -30,24 +35,60 @@ export function createApi(store) {
       }
     }
     mem[name] = result;
-    if (store.setCache) await store.setCache('source:' + name, result);
+    await setKV('source:' + name, result);
+    await setKV('meta:' + name, { loadedAt: result.loadedAt, status: result.status });
     return result;
   }
 
-  // Never calls Metabase: uses the last pull (warm memory, then the store). A source never pulled is fetched once.
+  // Never calls Metabase: uses the last pull. Daily sources are re-read from the store when the scheduled pull has
+  // replaced them; a source never pulled is fetched once (daily ones wait for the scheduled pull).
   async function getSource(name) {
-    if (mem[name]) return mem[name];
-    if (store.getCache) {
-      const cached = await store.getCache('source:' + name);
+    if (isDaily(name)) {
+      const meta = await getKV('meta:' + name);
+      if (mem[name] && (!meta || mem[name].loadedAt === meta.loadedAt)) return mem[name];
+      const cached = await getKV('source:' + name);
       if (cached) { mem[name] = cached; return cached; }
+      return { status: 'missing', origin: 'waiting for the daily pull', rows: [], loadedAt: null, daily: true };
     }
+    if (mem[name]) return mem[name];
+    const cached = await getKV('source:' + name);
+    if (cached) { mem[name] = cached; return cached; }
     return refreshSource(name);
+  }
+
+  // Page load / Refresh. Daily sources are not pulled here: the page gets the last daily pull. Only if there has
+  // never been a good pull does the page try once (at most once an hour), so a new setup isn't empty until the
+  // scheduled run.
+  async function pageRefresh(name) {
+    if (!isDaily(name)) return refreshSource(name);
+    const cur = await getSource(name);
+    if (cur.status === 'ok') return { ...cur, daily: true };
+    const attempt = await getKV('attempt:' + name);
+    if (attempt && Date.now() - new Date(attempt.at).getTime() < 3600_000) return { ...cur, daily: true, error: cur.error || 'Waiting for the daily pull (runs every hour until it succeeds)' };
+    await setKV('attempt:' + name, { at: new Date().toISOString() });
+    return { ...(await refreshSource(name)), daily: true };
+  }
+
+  // Scheduled (hourly): pulls each daily source once per IST day, with a longer timeout. Retries next hour if it
+  // failed, at most 3 tries a day.
+  async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false } = {}) {
+    const today = istDay(new Date().toISOString());
+    return Promise.all(DAILY_SOURCES.map(async (name) => {
+      const meta = await getKV('meta:' + name);
+      if (!force && meta && meta.status === 'ok' && istDay(meta.loadedAt) === today) return { name, skipped: 'already pulled today' };
+      const tries = await getKV('tries:' + name);
+      const n = tries && tries.day === today ? tries.n : 0;
+      if (!force && n >= 3) return { name, skipped: '3 failed tries today' };
+      await setKV('tries:' + name, { day: today, n: n + 1 });
+      const r = await refreshSource(name, { timeoutMs });
+      return { name, status: r.status, rows: r.rawRows ?? r.rows.length, error: r.error || null };
+    }));
   }
 
   async function buildState() {
     const sources = {};
     for (const name of SOURCE_NAMES) sources[name] = await getSource(name);
-    sources.loadedAt = SOURCE_NAMES.map((n) => sources[n].loadedAt).filter(Boolean).sort()[0] || new Date().toISOString();
+    sources.loadedAt = SOURCE_NAMES.filter((n) => !isDaily(n)).map((n) => sources[n].loadedAt).filter(Boolean).sort()[0] || new Date().toISOString();
     const settings = mergeSettings(await store.getSettings());
     const history = await store.listDecisions();
     const result = compute(sources, settings, history);
@@ -76,7 +117,7 @@ export function createApi(store) {
         loadedAt: sources.loadedAt,
         store: store.kind,
         sources: Object.fromEntries(SOURCE_NAMES.map((k) => [k, {
-          status: sources[k].status, stale: !!sources[k].stale, loadedAt: sources[k].loadedAt, origin: sources[k].origin, rows: sources[k].rawRows ?? sources[k].rows.length, error: sources[k].error || null,
+          status: sources[k].status, stale: !!sources[k].stale, daily: isDaily(k), loadedAt: sources[k].loadedAt, origin: sources[k].origin, rows: sources[k].rawRows ?? sources[k].rows.length, error: sources[k].error || null,
           columns: Object.keys(sources[k].rows[0] || {}), sample: sampleTypes(sources[k].rows)
         }]))
       },
@@ -118,8 +159,8 @@ export function createApi(store) {
     const srcMatch = p.match(/^\/api\/sources\/([A-Za-z]+)$/);
     if (srcMatch && req.method === 'POST') {
       if (!SOURCE_NAMES.includes(srcMatch[1])) return json(404, { error: 'Unknown source' });
-      const r = await refreshSource(srcMatch[1]);
-      return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
+      const r = await pageRefresh(srcMatch[1]);
+      return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, daily: !!r.daily, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
     if (p === '/api/state' && req.method === 'GET') return json(200, await buildState());
 
@@ -148,6 +189,7 @@ export function createApi(store) {
     async handle(req) {
       try { return await handle(req); } catch (e) { console.error(e); return json(500, { error: e.message }); }
     },
-    refreshSource
+    refreshSource,
+    runDaily
   };
 }

@@ -26,13 +26,13 @@ export function parseParams(str) {
   return out;
 }
 
-export async function runCard(cardId, paramStr = '') {
+export async function runCard(cardId, paramStr = '', opts = {}) {
   const base = (process.env.METABASE_URL || '').replace(/\/+$/, '');
   const key = process.env.METABASE_API_KEY;
   if (!base || !key) throw new Error('METABASE_URL and METABASE_API_KEY must be set');
   // Netlify stops a function at 10 s with a bare 504. Give up a little before that so the page gets a clear message
   // and the rest of the sources still load.
-  const timeoutMs = Number(process.env.MB_TIMEOUT_MS || 7500);
+  const timeoutMs = Number(opts.timeoutMs || process.env.MB_TIMEOUT_MS || 7500);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   let res;
@@ -50,7 +50,7 @@ export async function runCard(cardId, paramStr = '') {
     }
   } catch (e) {
     clearTimeout(timer);
-    if (e.name === 'AbortError') throw new Error(`Metabase Q${cardId} took longer than ${(timeoutMs / 1000).toFixed(1)} s (Netlify's limit is 10 s)`);
+    if (e.name === 'AbortError') throw new Error(`Metabase Q${cardId} took longer than ${(timeoutMs / 1000).toFixed(1)} s${opts.timeoutMs ? '' : " (Netlify's limit is 10 s)"}`);
     throw e;
   }
   clearTimeout(timer);

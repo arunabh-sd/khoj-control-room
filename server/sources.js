@@ -12,15 +12,18 @@ const SOURCES = {
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
   catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
   adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' },
-  overlap: { env: 'MB_Q_OVERLAP', file: 'overlap.csv', label: 'Khoj × parent seller buyer overlap' },
-  history: { env: 'MB_Q_CUSTOMER_HISTORY', file: 'history.csv', label: 'Khoj buyers\' ShopDeck order history (12 months)', compact: compactHistory },
-  universe: { env: 'MB_Q_UNIVERSE', params: 'MB_Q_UNIVERSE_PARAMS', file: 'universe.csv', label: 'ShopDeck universe (PQ ≥ 3)',
+  overlap: { env: 'MB_Q_OVERLAP', file: 'overlap.csv', label: 'Khoj × parent seller buyer overlap', daily: true },
+  history: { env: 'MB_Q_CUSTOMER_HISTORY', file: 'history.csv', label: 'Khoj buyers\' ShopDeck order history (12 months)', compact: compactHistory, daily: true },
+  universe: { env: 'MB_Q_UNIVERSE', params: 'MB_Q_UNIVERSE_PARAMS', file: 'universe.csv', label: 'ShopDeck universe (PQ ≥ 3)', daily: true,
     compact: (rows) => compactUniverse(rows, { minPq: Number(process.env.UNIVERSE_MIN_PQ ?? 3) }) }
 };
 export const SOURCE_NAMES = Object.keys(SOURCES);
 export const SOURCE_LABELS = Object.fromEntries(SOURCE_NAMES.map((k) => [k, SOURCES[k].label]));
+// Heavy questions that change slowly: pulled once a day by the scheduled function (netlify/functions/daily.mjs),
+// never on page load or Refresh.
+export const DAILY_SOURCES = SOURCE_NAMES.filter((k) => SOURCES[k].daily);
 
-export async function loadOne(name) {
+export async function loadOne(name, { timeoutMs } = {}) {
   const src = SOURCES[name];
   if (!src) throw new Error(`Unknown source ${name}`);
   const loadedAt = new Date().toISOString();
@@ -40,7 +43,7 @@ export async function loadOne(name) {
     }
     const id = process.env[src.env] || (src.alt && process.env[src.alt]);
     if (!id) return { status: 'missing', origin: `${src.env} not set`, rows: [], loadedAt };
-    let rows = await runCard(id, src.params ? process.env[src.params] : '');
+    let rows = await runCard(id, src.params ? process.env[src.params] : '', { timeoutMs });
     const rawRows = rows.length;
     if (src.compact) rows = src.compact(rows);
     return { status: 'ok', origin: `Metabase Q${id}`, rows, rawRows, loadedAt };

@@ -12,6 +12,7 @@ const pc = (n, d = 0) => (n === null || n === undefined || !Number.isFinite(n) ?
 const chip = (cls, text) => `<span class="chip chip-${cls}">${esc(text)}</span>`;
 const inCat = (c) => ui.cat === 'All' ? CATS.includes(c) : c === ui.cat;
 const link = (url, text) => (url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(text)}</a>` : esc(text));
+const fmtWhen = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '');
 const fmtDate = (iso) => { if (!iso) return ''; const d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso); return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); };
 
 const ACTION = {
@@ -93,11 +94,13 @@ async function load(pull = true) {
         const r = await fetch('/api/sources/' + names[i].name, { method: 'POST' });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(body.error || (r.status === 504 || r.status === 502 ? 'timed out' : r.statusText));
-        note = body.status === 'ok' ? `${int(body.rows)} rows` : body.status === 'missing' ? 'not connected' : body.stale ? 'failed · using last pull' : 'failed';
-        if (body.status === 'error') failures.push(`${names[i].label}: ${body.error || 'failed'}${body.stale ? ' (showing the last good pull)' : ''}`);
+        note = body.daily
+          ? (body.status === 'ok' ? `daily · pulled ${fmtWhen(body.loadedAt)}` : body.status === 'missing' ? 'waiting for the daily pull' : 'daily pull failed')
+          : body.status === 'ok' ? `${int(body.rows)} rows` : body.status === 'missing' ? 'not connected' : body.stale ? 'failed · using last pull' : 'failed';
+
       } catch (err) {
         note = 'failed';
-        failures.push(`${names[i].label}: ${err.message}`);
+        failures.push(`${names[i].label}: ${err.message}`);   // the request itself failed (e.g. a Netlify 504); per-source errors show from the state
       }
       progress.steps[i].note = note;
     }
@@ -130,7 +133,9 @@ function renderChrome() {
   if (d) {
     for (const [k, s] of Object.entries(d.meta.sources)) {
       if (s.status === 'error') notices.push(`<div class="notice notice-orange"><strong>${esc(k)}</strong> source failed (${esc(s.origin)}): ${esc(s.error)}</div>`);
-      else if (s.status === 'missing' && !['universe', 'overlap'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
+      else if (s.stale) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> didn't refresh (${esc(s.error)}). Showing the pull from ${esc(fmtWhen(s.loadedAt))}.</div>`);
+      else if (s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: waiting for the daily pull, which runs every hour until it succeeds.</div>`);
+      else if (s.status === 'missing' && !['universe', 'overlap', 'history'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
     }
     for (const n of d.notes) notices.push(`<div class="notice notice-amber">${esc(n)}</div>`);
     if (d.meta.store === 'memory') notices.push('<div class="notice notice-amber">No persistent store: task ticks and the decision log are kept in memory and reset on restart.</div>');
@@ -329,8 +334,8 @@ function sourcesCard(d) {
   const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
-    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.stale ? chip('amber', `Last pull ${fmtDate(s.loadedAt)} · refresh failed`) : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
-    <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
+    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · daily, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
+    <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”, except the universe, order history and buyer overlap questions, which are pulled once a day. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
   </section>`;
 }
 
