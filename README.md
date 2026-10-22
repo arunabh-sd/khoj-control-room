@@ -28,6 +28,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_CUSTOMER_HISTORY` | `16717` (Khoj buyers' ShopDeck order history, 12 months) |
 | `MB_Q_EVENTS` | `16724` (site sessions, `sql/site_sessions.sql`) |
 | `MB_Q_BENCHMARK` | `16725` (repeat benchmark, `sql/repeat_benchmark.sql`) |
+| `MB_Q_BROWSING` | Khoj buyers' browsing on ShopDeck sites (`sql/khoj_buyer_browsing.sql`) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
 
 3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
@@ -170,6 +171,14 @@ WHERE o.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
 Each parent seller counts in the comparison in proportion to the Khoj orders of its products, so the benchmark is "what these products' own storefronts do". Sellers with under 100 sessions (events) or 20 customers in a window (repeat) are left out; the page shows how much of Khoj's orders the benchmark covers.
 
 The order history question is `sql/customer_history_q16717.sql`.
+
+### Khoj buyers' browsing (`MB_Q_BROWSING`)
+
+`sql/khoj_buyer_browsing.sql`: product pages Khoj buyers opened on ShopDeck seller sites (Khoj left out), from 30 days before their first Khoj order, one row per customer × seller × product × day. A browser is tied to a customer through `user_id` on product page, checkout, OTP and ShopDeck sign-in events. Feeds the browsing rows of "Could we have predicted the order?" and the customer timelines. Scheduled once a day.
+
+### Fallback copy of the universe
+
+If Metabase can't deliver Q16457, the dashboard uses an uploaded copy: Data sources → "Upload a copy (CSV export of Q16457)". The browser shrinks the export to the compact rows and uploads them (gzipped) to Netlify Blobs; nothing goes into the repo. A fresh Metabase pull replaces it automatically.
 
 ## Rules (defaults)
 

@@ -5,6 +5,8 @@
 -- kind = 'seller'     : one row per seller, the session funnel (all visitors, and new visitors only)
 -- kind = 'landing'    : per seller × landing product (first product page opened) × new/returning visitor
 -- kind = 'depth'      : per seller × products viewed in the session (1, 2, 3-5, 6+)
+-- kind = 'source'     : per seller × traffic source of the session's first page (from utm_source) × new/returning
+-- kind = 'device'     : per seller × device of the session's first page
 -- kind = 'khoj_next'  : Khoj only, landing product → second product viewed
 -- kind = 'khoj_click' : Khoj only, landing product → product that got the buy-now click
 -- A visitor is "returning" if they opened a product page on the same site in the 90 days before the session.
@@ -13,7 +15,8 @@ WITH sellers AS (
   [[UNION DISTINCT SELECT TRIM(x) FROM UNNEST(SPLIT({{parent_sellers}}, ',')) AS x WHERE TRIM(x) <> '']]
 ),
 ppo AS (
-  SELECT p.seller_id, p.session_id, p.visitor_id, CAST(p.product_id AS STRING) AS product_id, p.created_at
+  SELECT p.seller_id, p.session_id, p.visitor_id, CAST(p.product_id AS STRING) AS product_id, p.created_at,
+         p.utm_source, p.utm_medium, p.device
   FROM `events.product_page_opened` p
   JOIN sellers s ON p.seller_id = s.seller_id
   WHERE COALESCE(p.session_id, '') <> '' AND COALESCE(p.visitor_id, '') <> ''
@@ -26,7 +29,8 @@ seen AS (
 ),
 views AS (
   SELECT seller_id, session_id, ANY_VALUE(visitor_id) AS visitor_id, product_id,
-         MIN(created_at) AS first_at, MAX(created_at) AS last_at, COUNT(*) AS opens
+         MIN(created_at) AS first_at, MAX(created_at) AS last_at, COUNT(*) AS opens,
+         ANY_VALUE(utm_source) AS utm_source, ANY_VALUE(utm_medium) AS utm_medium, ANY_VALUE(device) AS device
   FROM ppo
   WHERE DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
   GROUP BY seller_id, session_id, product_id
@@ -35,12 +39,21 @@ sessions0 AS (
   SELECT seller_id, session_id, ANY_VALUE(visitor_id) AS visitor_id,
          SUM(opens) AS ppo, COUNT(*) AS products, MIN(first_at) AS start_at,
          TIMESTAMP_DIFF(MAX(last_at), MIN(first_at), SECOND) AS secs,
-         ARRAY_AGG(product_id ORDER BY first_at LIMIT 2) AS first_two
+         ARRAY_AGG(product_id ORDER BY first_at LIMIT 2) AS first_two,
+         ARRAY_AGG(STRUCT(utm_source, utm_medium, device) ORDER BY first_at LIMIT 1)[OFFSET(0)] AS entry
   FROM views
   GROUP BY seller_id, session_id
 ),
 sessions AS (
   SELECT se.seller_id, se.session_id, se.ppo, se.products, se.secs,
+         CASE
+           WHEN REGEXP_CONTAINS(LOWER(COALESCE(se.entry.utm_source, '')), r'facebook|^fb|instagram|^ig$|^meta') THEN 'Meta ads'
+           WHEN REGEXP_CONTAINS(LOWER(COALESCE(se.entry.utm_source, '')), r'google|youtube') THEN 'Google'
+           WHEN REGEXP_CONTAINS(LOWER(COALESCE(se.entry.utm_source, '')), r'whatsapp|^wa$|wati|interakt') THEN 'WhatsApp'
+           WHEN COALESCE(se.entry.utm_source, '') = '' THEN 'No UTM (direct, organic, saved link)'
+           ELSE 'Other UTM'
+         END AS source,
+         COALESCE(LOWER(se.entry.device), 'unknown') AS device,
          se.first_two[OFFSET(0)] AS landing_product,
          IF(ARRAY_LENGTH(se.first_two) > 1, se.first_two[OFFSET(1)], NULL) AS second_product,
          IF(EXISTS (SELECT 1 FROM UNNEST(sn.opens_at) t
@@ -106,6 +119,24 @@ SELECT 'landing', seller_id,
 FROM s
 GROUP BY seller_id, landing_product, visitor_type
 HAVING COUNT(*) >= 3 OR seller_id = '6aad1869bcb80ce92eb3389b'
+
+UNION ALL
+SELECT 'source', seller_id,
+  CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(source AS STRING), CAST(visitor_type AS STRING),
+  COUNT(*), SUM(ppo), SUM(products), COUNTIF(products >= 2), SUM(secs),
+  COUNTIF(bn), COUNTIF(bn_products >= 2), COUNTIF(co), CAST(NULL AS INT64),
+  CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64)
+FROM s
+GROUP BY seller_id, source, visitor_type
+
+UNION ALL
+SELECT 'device', seller_id,
+  CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(device AS STRING), CAST(NULL AS STRING),
+  COUNT(*), SUM(ppo), SUM(products), COUNTIF(products >= 2), SUM(secs),
+  COUNTIF(bn), COUNTIF(bn_products >= 2), COUNTIF(co), CAST(NULL AS INT64),
+  CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64)
+FROM s
+GROUP BY seller_id, device
 
 UNION ALL
 SELECT 'depth', seller_id,

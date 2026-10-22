@@ -166,3 +166,4 @@ tr.cust td { vertical-align: top; }
 tr.cust summary { cursor: pointer; }
 .timeline { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 520px; }
 .timeline li.khoj { font-weight: 500; }
+.timeline li.browse { color: var(--muted); }

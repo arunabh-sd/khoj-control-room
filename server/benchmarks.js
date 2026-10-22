@@ -144,6 +144,18 @@ export function analyseEvents(rows, { khojSellerId, weights, idx, khojToSellerPr
     return { rows: rowsOut, mixEffect, rateEffect };
   };
   const visitors = decompose(segOf(landing, (r) => r.visitor_type || null), ['new', 'returning']);
+  const keysBy = (list, f) => { const m = new Map(); for (const r of list) { const k = f(r); if (k) m.set(k, (m.get(k) || 0) + n(r.sessions)); } return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k); };
+  const srcRows = rows.filter((r) => kindOf(r) === 'source').map((r) => ({ ...r, seller_id: String(r.seller_id) }));
+  const devRows = rows.filter((r) => kindOf(r) === 'device').map((r) => ({ ...r, seller_id: String(r.seller_id) }));
+  const sources = srcRows.length ? decompose(segOf(srcRows, (r) => r.bucket || null), keysBy(srcRows, (r) => r.bucket)) : null;
+  const devices = devRows.length ? decompose(segOf(devRows, (r) => r.bucket || null), keysBy(devRows, (r) => r.bucket)) : null;
+  // Within paid Meta traffic only, new visitors only: the closest like-for-like the data allows.
+  const metaNew = (() => {
+    const list = srcRows.filter((r) => r.bucket === 'Meta ads' && r.visitor_type === 'new');
+    if (!list.length) return null;
+    const d = decompose(segOf(list, () => 'x'), ['x']).rows[0];
+    return d && d.khojRate !== null ? d : null;
+  })();
   const CATS = ['Saree', 'Kurti & Suits', 'Jewellery', 'Other'];
   const categories = decompose(segOf(landing, (r) => r.cat || null), CATS);
   const landingCatCoverage = (() => { const k = landing.filter((r) => r.seller_id === K); const all = k.reduce((a, r) => a + n(r.sessions), 0); return pct(k.filter((r) => r.cat).reduce((a, r) => a + n(r.sessions), 0), all); })();
@@ -219,6 +231,12 @@ export function analyseEvents(rows, { khojSellerId, weights, idx, khojToSellerPr
       findings.push({ tone: 'info', text: `Visitor mix: ${nw.khojShare.toFixed(0)}% of Khoj sessions are new visitors vs ${nw.benchShare.toFixed(0)}% on the sellers' sites. Mix accounts for ${v.mixEffect.toFixed(2)} products per session of the gap; behaviour within each visitor type for ${v.rateEffect.toFixed(2)}.` });
       if (nw.khojRate !== null && nw.benchRate !== null) findings.push({ tone: nw.khojRate < nw.benchRate ? 'bad' : 'good', text: `New visitors only: Khoj ${nw.khojRate.toFixed(2)} vs ${nw.benchRate.toFixed(2)} products per session. ${nw.khojRate < nw.benchRate ? 'Khoj is lower even like-for-like, so it is not only cold traffic.' : 'Like-for-like, Khoj is not worse: the gap is the traffic mix.'}` });
     }
+    if (sources?.rows.length) {
+      const meta = sources.rows.find((r) => r.key === 'Meta ads');
+      const topB = [...sources.rows].sort((a, b) => (b.benchShare || 0) - (a.benchShare || 0))[0];
+      findings.push({ tone: 'info', text: `Traffic source: ${meta?.khojShare?.toFixed(0) ?? '—'}% of Khoj sessions come from Meta ads vs ${meta?.benchShare?.toFixed(0) ?? '—'}% on the sellers' sites${topB && topB.key !== 'Meta ads' ? ` (their biggest source is ${topB.key}, ${topB.benchShare.toFixed(0)}%)` : ''}. Source mix accounts for ${sources.mixEffect.toFixed(2)} products per session; behaviour within each source for ${sources.rateEffect.toFixed(2)}.` });
+    }
+    if (metaNew) findings.push({ tone: metaNew.khojRate < metaNew.benchRate ? 'bad' : 'good', text: `Closest like-for-like (new visitors from Meta ads): Khoj ${metaNew.khojRate.toFixed(2)} vs ${metaNew.benchRate.toFixed(2)} products per session, ${metaNew.khojMulti?.toFixed(0) ?? '—'}% vs ${metaNew.benchMulti?.toFixed(0) ?? '—'}% viewing 2+ products.` });
     const c = categories;
     if (c.rows.some((r) => r.khojShare)) {
       const top = [...c.rows].filter((r) => r.khojRate !== null && r.benchRate !== null).sort((a, b) => (a.khojRate - a.benchRate) * (a.khojShare || 0) - (b.khojRate - b.benchRate) * (b.khojShare || 0))[0];
@@ -234,7 +252,7 @@ export function analyseEvents(rows, { khojSellerId, weights, idx, khojToSellerPr
 
   return {
     khojSessions: khoj ? n(khoj.sessions) : 0, metrics, parentSellers: others.length,
-    rca: { findings, funnel, visitors, categories, landingCatCoverage, sameProduct, depth, secondView, hasLanding: landing.length > 0 },
+    rca: { findings, funnel, visitors, sources, devices, metaNew, categories, landingCatCoverage, sameProduct, depth, secondView, hasLanding: landing.length > 0 },
     beyond: {
       clicks: total, otherPct: pct(other, total),
       otherSameSellerPct: pct(otherSameSeller, known), otherAnotherSellerPct: pct(known - otherSameSeller, known),

@@ -358,3 +358,23 @@ test('parent-seller benchmarks are weighted by Khoj orders', async () => {
   assert.equal(rb.rates.d14, (3 * 10 + 1 * 30) / 4);
   assert.equal(rb.khojFromQuestion.d14, 10);
 });
+
+test('personalisation: browsing the same product on a seller site before the Khoj order counts as a signal', async () => {
+  const { compactHistory, compactBrowsing } = await import('../server/history.js');
+  const K = 'khoj';
+  const line = (c, s, p, when, extra = {}) => ({ order_id: `${c}-${s}-${when}`, customer_id: c, seller_id: s, customer_product_short_id: p, createdat: when,
+    selling_price: '500', quantity: '1', payment_mode: 'cod', in_house_status: 'delivered', seller_last_status: 'delivered', pincode: '560049', meta: 'web', ...extra });
+  const s = src([product('1', { seller_id: 'sellerA' })]);
+  s.history = { status: 'ok', rows: compactHistory([line('c1', K, '1', '10-10-2026, 10:00'), line('c2', K, '1', '11-10-2026, 10:00')]) };
+  s.browsing = { status: 'ok', rows: compactBrowsing([
+    { customer_id: 'c1', seller_id: 'sellerA', product_id: 'spA', first_view: '2026-10-08 20:00', views: 3 },   // 2 days before: same product
+    { customer_id: 'c2', seller_id: 'sellerA', product_id: 'spA', first_view: '2026-10-12 09:00', views: 1 }    // after the order: ignored
+  ]) };
+  s.universe = { status: 'ok', rows: [{ category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees', n: 1, uploaded: 1, live: 1, l30d_orders: 400, l30d_spend: 1, profit_pct_d40_d10: 1, khoj_product_id: '1', seller_product_id: 'spA', pq: 5 }] };
+  const P = compute(s, { ...S, khojSellerId: K }, [], '2026-10-22').customers.audience.personalisation;
+  const lv = (k) => P.browsing.levels.find((x) => x.key === k);
+  assert.equal(P.browsing.linkedBuyers, 100);
+  assert.equal(lv('b_product').d3, 50);
+  assert.equal(lv('b_seller').d7, 50);
+  assert.equal(lv('all_any').d30, 50);
+});

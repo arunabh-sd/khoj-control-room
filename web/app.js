@@ -134,9 +134,10 @@ function renderChrome() {
     for (const [k, s] of Object.entries(d.meta.sources)) {
       if (s.status === 'error' && s.daily) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: not pulled yet. The scheduled pull checks every 5 minutes (last try: ${esc(s.error)}).</div>`);
       else if (s.status === 'error') notices.push(`<div class="notice notice-orange"><strong>${esc(k)}</strong> source failed (${esc(s.origin)}): ${esc(s.error)}</div>`);
+      else if (s.fallback) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: using the uploaded copy from ${esc(fmtWhen(s.loadedAt))} until Metabase delivers a fresh one (${esc(s.error || '')}).</div>`);
       else if (s.stale) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> didn't refresh (${esc(s.error)}). Showing the pull from ${esc(fmtWhen(s.loadedAt))}${s.daily ? '; the scheduled pull retries within 5 minutes' : ''}.</div>`);
       else if (s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: waiting for the scheduled pull, which checks every 5 minutes.</div>`);
-      else if (s.status === 'missing' && !['universe', 'overlap', 'history', 'events', 'benchmark'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
+      else if (s.status === 'missing' && !['universe', 'overlap', 'history', 'events', 'benchmark', 'browsing'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
     }
     for (const n of d.notes) notices.push(`<div class="notice notice-amber">${esc(n)}</div>`);
     if (d.meta.store === 'memory') notices.push('<div class="notice notice-amber">No persistent store: task ticks and the decision log are kept in memory and reset on restart.</div>');
@@ -332,10 +333,10 @@ function logCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', events: 'Site sessions vs parent sellers', benchmark: 'Repeat benchmark (parent sellers)' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', events: 'Site sessions vs parent sellers', benchmark: 'Repeat benchmark (parent sellers)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
-    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
+    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.fallback ? chip('amber', `Uploaded copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${k === 'universe' ? `<label class="btn" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px" for="universeFile">${ui.fbBusy ? 'Uploading…' : 'Upload a copy (CSV export of Q16457)'}</label><input type="file" id="universeFile" accept=".csv,text/csv" hidden ${ui.fbBusy ? 'disabled' : ''}><span class="muted small">Used whenever Metabase can't deliver it.</span>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
     <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”, except the slow ones on a schedule: products every 3 hours; universe, order history and buyer overlap once a day. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
   </section>`;
 }
@@ -473,7 +474,6 @@ const segCols = (head) => [
 
 const DATA_EVENTS = ['Site sessions (MB_Q_EVENTS)', 'the site events question in the README: Khoj and its parent sellers, last 28 days'];
 const DATA_BENCH = ['Repeat benchmark (MB_Q_BENCHMARK)', 'the repeat benchmark question in the README: Khoj and its parent sellers'];
-const DATA_LINK = ['Visitor → customer link', 'events carry visitor_id; showing what a buyer browsed needs the customer_id (or phone) on an event such as checkout_initiated'];
 // Khoj vs the parent sellers' own sites, weighted by Khoj orders: the comparison value for a rate.
 const benchCell = (v, unit = 'pct') => (v === null || v === undefined ? '<span class="muted small">—</span>' : unit === 'pct' ? pc(v, 1) : v.toFixed(v < 10 ? 2 : 0));
 function historyMissing(title) {
@@ -487,10 +487,10 @@ function historySub(d) {
 function viewAudience(d) {
   const cu = d.customers;
   const overlapMissing = `<section class="card"><div class="card-head"><h2>Cannibalisation · Khoj × parent seller</h2>${chip('amber', 'Not connected')}</div><p class="small muted">Set <code>MB_Q_OVERLAP</code> to the overlap question (Q16494).</p></section>`;
-  const later = planned('Still to come', 'Needs a visitor → customer link in the events', [
-    ['Browsed but didn\'t buy', ['Products and categories each buyer viewed or clicked buy-now on without buying, in their timeline', 'Visitors who never bought: what they looked at']],
-    ['Next-best product per customer', ['Top hero products per customer from their journey, category affinity and price band', 'Export as Meta custom audiences']]
-  ], [DATA_LINK]);
+  const later = planned('Still to come', 'Next steps on top of this data', [
+    ['Next-best product per customer', ['Top hero products per customer from their orders, browsing, category affinity and price band', 'Export as Meta custom audiences']],
+    ['Browsed but didn\'t buy on Khoj', ['Khoj visitors who never ordered: what they looked at, matched to their ShopDeck history']]
+  ], [['Khoj buyers\' browsing (MB_Q_BROWSING)', 'sql/khoj_buyer_browsing.sql']]);
   if (!cu || cu.error || !cu.audience) return historyMissing('Audience intelligence') + (d.overlap ? overlapCard(d) : overlapMissing) + later;
   const a = cu.audience, pr = a.predict, pa = a.parent, cmp = a.compare;
   const recent7 = a.byRecency.find((x) => x.key === 'Within 7 days');
@@ -510,21 +510,21 @@ function viewAudience(d) {
   const P = a.personalisation;
   const lvl = P ? P.levels : [];
   const predict = !P ? '' : card('Personalisation potential', 'Could we have predicted the order? Personalisation potential', `Share of ${int(P.orders)} Khoj orders that the customer's earlier signals pointed to, by how specific the signal was and how recent. Earlier orders on any ShopDeck site (and earlier Khoj visits) count; browsing comes next.`, kpiRow([
-    ['Predictable from the last 7 days', pc(lvl.find((x) => x.key === 'any')?.d7, 1), 'same product, seller, L4 or test category'],
-    ['Predictable from the last 30 days', pc(lvl.find((x) => x.key === 'any')?.d30, 1), `${pc(P.active.d30)} of orders had any ShopDeck order in those 30 days`],
+    ['Predictable from the last 7 days', pc((P.browsing ? P.browsing.levels.find((x) => x.key === 'all_any') : lvl.find((x) => x.key === 'any'))?.d7, 1), P.browsing ? 'orders or browsing: same product, seller, L4 or test category' : 'from orders: same product, seller, L4 or test category'],
+    ['Predictable from the last 30 days', pc((P.browsing ? P.browsing.levels.find((x) => x.key === 'all_any') : lvl.find((x) => x.key === 'any'))?.d30, 1), `${pc(P.active.d30)} of orders had any ShopDeck order in those 30 days`],
     ['Predictable from 12 months', pc(lvl.find((x) => x.key === 'any')?.d365, 1), `${pc(P.active.d365)} had any order in 12 months`],
     ['Same L4, last 30 days', pc(lvl.find((x) => x.key === 'l4')?.d30, 1), 'the specific signal a feed can use']
   ]) + tbl([
-    { h: 'Earlier order was…', v: (r) => esc(r.label) },
+    { h: 'Earlier signal', v: (r) => (r.key === 'all_any' ? `<strong>${esc(r.label)}</strong>` : esc(r.label)) },
     { h: 'Last 3 days', r: 1, v: (r) => pc(r.d3, 1) }, { h: 'Last 7 days', r: 1, v: (r) => pc(r.d7, 1) },
     { h: 'Last 30 days', r: 1, v: (r) => pc(r.d30, 1) }, { h: 'Last 12 months', r: 1, v: (r) => pc(r.d365, 1) }
-  ], [...lvl, { label: 'Browsed the same product / L4 on a ShopDeck site', browse: true }].map((r) => (r.browse ? { label: r.label, d3: null, d7: null, d30: null, d365: null } : r)), { min: 720 })
+  ], [...lvl.map((r) => ({ ...r, label: `Ordered: ${r.label.charAt(0).toLowerCase()}${r.label.slice(1)}` })), ...(P.browsing ? P.browsing.levels : [{ label: 'Browsed: waiting for the browsing question', d3: null, d7: null, d30: null, d365: null }])], { min: 720 })
   + `<div style="margin-top:4px">${tbl([
     { h: 'Khoj order category', v: (r) => esc(r.key) }, { h: 'Orders', r: 1, v: (r) => int(r.orders) },
     { h: 'Any signal, 7 days', r: 1, v: (r) => pc(r.any_7, 1) }, { h: 'Same L4, 30 days', r: 1, v: (r) => pc(r.l4_30, 1) },
     { h: 'Same test category, 30 days', r: 1, v: (r) => pc(r.cat_30, 1) }, { h: 'Same test category, 12 months', r: 1, v: (r) => pc(r.cat_365, 1) }, { h: 'Same seller, 12 months', r: 1, v: (r) => pc(r.seller_365, 1) }
   ], P.byCat, { min: 860 })}</div>
-  <p class="small muted">Browsing row: waiting for ShopDeck-wide browsing of these customers (needs a customer key on events). L4 is only known for ${pc(cu.coverage.sdCategoryKnown)} of earlier ShopDeck orders, so the L4 row reads low; test category also uses product names. Buyer-level view: of ${int(a.withPrior)} buyers with history, ${pc(pr.sameCat, 1)} had bought the same test category and ${pc(pr.sameSeller, 1)} from the same parent seller.</p>`);
+  <p class="small muted">${P.browsing ? `Browsing: product pages on ShopDeck sites (Khoj left out), tied to ${pc(P.browsing.linkedBuyers)} of Khoj buyers through their user id; buyers who browsed logged out can't be seen, so browsing rows read low.` : 'Browsing rows appear once the browsing question (MB_Q_BROWSING) is connected.'} L4 is only known for ${pc(cu.coverage.sdCategoryKnown)} of earlier ShopDeck orders, so the L4 row reads low; test category also uses product names. Buyer-level view: of ${int(a.withPrior)} buyers with history, ${pc(pr.sameCat, 1)} had bought the same test category and ${pc(pr.sameSeller, 1)} from the same parent seller.</p>`);
   const cc = (k) => ({ h: `Bought ${k} before`, r: 1, v: (r) => pc(r[k]), cls: (r) => (r.key === k ? 'good' : '') });
   const cross = card('Cross-category purchases', 'Cross-category purchases', 'Of buyers with ShopDeck history: what they had bought before, by what they bought first on Khoj', tbl([
     { h: 'First Khoj category', v: (r) => esc(r.key) }, { h: 'Buyers', r: 1, v: (r) => int(r.known) },
@@ -573,7 +573,7 @@ function customersCard(d) {
   return `<section class="card" aria-label="Customers">
     <div class="card-head"><div><h2>Customers</h2><span class="muted small">Every Khoj buyer: their ShopDeck journey, their Khoj orders and a one-line read · newest first · click a row for the full timeline</span></div></div>
     <div id="custTable">${custTableInner()}</div>
-    <p class="small muted">Coming once events carry the customer: what each buyer browsed on Khoj without buying, in their timeline.</p>
+    <p class="small muted">Timelines include product pages each buyer browsed on ShopDeck sites before Khoj, when the browsing question is connected and the browser was signed in.</p>
   </section>`;
 }
 function custFiltered() {
@@ -596,7 +596,7 @@ function custTableInner() {
   const when = (m) => new Date(m * 60000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
   const body = shown.map((r) => `<tr class="cust">
       <td><details><summary><span class="num">…${esc(r.id.slice(-6))}</span><span class="muted small"> · ${esc(r.type)}${r.state ? ' · ' + esc(r.state) : ''}</span></summary>
-        <ol class="timeline">${r.steps.map((s) => `<li class="${s.khoj ? 'khoj' : ''}"><span class="num small muted">${when(s.t)}</span> ${s.khoj ? chip('blue', 'Khoj') : ''} <strong>${esc(s.cat || '—')}</strong>${s.l4 ? ` <span class="muted small">${esc(s.l4)}</span>` : ''} · ${esc(s.name || 'product')} <span class="muted small">· ${esc(s.seller)} · ${inr(s.g)}${s.st !== 'D' ? ' · ' + (stName[s.st] || '') : ''}</span></li>`).join('')}</ol>
+        <ol class="timeline">${r.steps.map((s) => `<li class="${s.khoj ? 'khoj' : s.browse ? 'browse' : ''}"><span class="num small muted">${when(s.t)}</span> ${s.khoj ? chip('blue', 'Khoj') : s.browse ? chip('muted', 'Browsed') : ''} <strong>${esc(s.cat || '—')}</strong>${s.l4 ? ` <span class="muted small">${esc(s.l4)}</span>` : ''} · ${esc(s.name || 'product')} <span class="muted small">· ${esc(s.seller)}${s.browse ? ` · ${int(s.views)} view${s.views > 1 ? 's' : ''}` : ` · ${inr(s.g)}${s.st !== 'D' ? ' · ' + (stName[s.st] || '') : ''}`}</span></li>`).join('')}</ol>
       </details></td>
       <td>${esc(r.khojCat || '—')}<div class="muted small">${when(r.firstKhoj)} · ${int(r.khojOrders)} order${r.khojOrders > 1 ? 's' : ''} · ${inr(r.khojGmv)} · ${r.pay}${r.firstState === 'R' ? ' · RTO' : ''}</div></td>
       <td class="r num">${int(r.priorOrders)}<div class="muted small">${int(r.priorSellers)} seller${r.priorSellers === 1 ? '' : 's'}${r.lastGap !== null ? ` · last ${r.lastGap === 0 ? 'same day' : r.lastGap + 'd before'}` : ''}</div></td>
@@ -680,6 +680,8 @@ function rcaCard(S) {
       { h: 'Share of the shortfall', r: 1, v: (r) => (r.shareOfGap === null ? '<span class="muted small">ahead</span>' : pc(r.shareOfGap)) }
     ], R.funnel)}</div></div>
     ${R.hasLanding ? `<div><div class="group-title">2 · Who comes: new vs returning visitors</div><div style="margin-top:8px">${segTbl('Visitors', R.visitors)}</div></div>
+    ${R.sources ? `<div><div class="group-title">2b · Where they come from: traffic source</div><div style="margin-top:8px">${segTbl('Source (first page of the session)', R.sources)}</div></div>` : ''}
+    ${R.devices ? `<div><div class="group-title">2c · Device</div><div style="margin-top:8px">${segTbl('Device', R.devices)}</div></div>` : ''}
     <div><div class="group-title">3 · What they land on: category</div><div style="margin-top:8px">${segTbl('Landing category', R.categories)}</div><p class="small muted">Landing category known for ${pc(R.landingCatCoverage)} of Khoj sessions.</p></div>
     <div><div class="group-title">4 · Same product, two storefronts</div><p class="small muted" style="margin:6px 0 8px">New visitors landing on a Khoj product vs new visitors landing on the same product on its seller's own site · ${int(sp.products)} products, ${pc(sp.coverage)} of Khoj new-visitor sessions</p>
       ${sp.products ? kpiRow([
@@ -774,6 +776,22 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('change', async (e) => {
+  if (e.target.id === 'universeFile') {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    ui.fbBusy = true; ui.msg = ''; ui.note = ''; render();
+    try {
+      const { compactUniverseCsv, gzipJson } = await import('./universe-upload.js');
+      const { rows, rawRows } = compactUniverseCsv(await file.text());
+      const body = await gzipJson({ rows, rawRows, name: file.name, fileDate: new Date(file.lastModified).toISOString() });
+      const r = await fetch('/api/fallback/universe', { method: 'POST', headers: { 'content-type': 'application/gzip' }, body });
+      const res = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(res.error || r.statusText);
+      ui.note = `Universe copy uploaded: ${int(rawRows)} products from ${file.name}. It's used whenever Metabase can't deliver Q16457.`;
+    } catch (err) { ui.msg = 'Upload failed: ' + err.message; }
+    ui.fbBusy = false;
+    await load(false);
+    return;
+  }
   if (e.target.dataset && e.target.dataset.cf && e.target.dataset.cf !== 'q') { custUi[e.target.dataset.cf] = e.target.value; custUi.page = 0; $('custTable').innerHTML = custTableInner(); return; }
   if (e.target.id === 'showDone') { ui.showDone = e.target.checked; remember(); render(); return; }
   const id = e.target.dataset.task;

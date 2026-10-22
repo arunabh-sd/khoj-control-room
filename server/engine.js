@@ -838,7 +838,7 @@ export function compute(src, s, history, today = todayIST()) {
     if (r.seller_product_id && r.category_l4) sellerProductCat.set(String(r.seller_product_id), { l4: r.category_l4, cat: categoryOf(r) });
   }
   if (src.history?.rows?.length) {
-    customers = analyseHistory(src.history.rows, { khojSellerId: s.khojSellerId, sessionMinutes: s.sessionMinutes, idx, khojToSellerProduct, sellerProductCat, productUrl: (p) => productUrl(p, s.khojBaseUrl) });
+    customers = analyseHistory(src.history.rows, { khojSellerId: s.khojSellerId, sessionMinutes: s.sessionMinutes, idx, khojToSellerProduct, sellerProductCat, browsing: src.browsing?.rows || [], productUrl: (p) => productUrl(p, s.khojBaseUrl) });
     if (customers?.error) notes.push(customers.error);
   }
 

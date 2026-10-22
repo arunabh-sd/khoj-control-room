@@ -1,5 +1,6 @@
 // Platform-neutral API: a function from a web-standard Request to a Response.
 // Used by the Netlify Function (netlify/functions/api.mjs) and by the local Node server (server/index.js).
+import zlib from 'node:zlib';
 import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES, EVERY_HOURS, PHASE } from './sources.js';
 import { khojOrderWeights, parentSellerList } from './benchmarks.js';
 import { buildProductIndex } from './engine.js';
@@ -60,10 +61,16 @@ export function createApi(store) {
       let src = mem[name] && (!meta || mem[name].loadedAt === meta.loadedAt) ? mem[name] : null;
       if (!src) { src = await getKV('source:' + name); if (src) mem[name] = src; }
       if (!src) src = { status: 'missing', origin: 'waiting for the daily pull', rows: [], loadedAt: null, daily: true };
+      // No good pull yet: use the uploaded copy (a stale file the user gave), so the dashboard still works.
+      if (src.status !== 'ok') {
+        const fb = await getKV('fallback:' + name);
+        if (fb?.rows?.length) src = { ...fb, status: 'ok', stale: true, fallback: true, error: src.error || 'no pull from Metabase yet' };
+      }
       // A scheduled pull that started but never finished was stopped by Netlify (30 s for scheduled functions).
       const running = await getKV('running:' + name);
       if (running?.at && Date.now() - new Date(running.at).getTime() > 60_000 && (!src.loadedAt || new Date(running.at) > new Date(src.failedAt || src.loadedAt))) {
         const msg = `the scheduled pull started ${new Date(new Date(running.at).getTime() + 330 * 60000).toISOString().slice(11, 16)} IST and was stopped by Netlify before it finished (30 s limit for scheduled functions). The question is too big or too slow`;
+        if (src.status !== 'ok') { const fb = await getKV('fallback:' + name); if (fb?.rows?.length) return { ...fb, status: 'ok', stale: true, fallback: true, error: msg }; }
         return src.status === 'ok' ? { ...src, stale: true, error: msg } : { ...src, status: 'error', error: msg };
       }
       return src;
@@ -96,7 +103,7 @@ export function createApi(store) {
   };
   // Bump when a deploy changes what the scheduled questions need (columns, compaction): the next scheduled run then
   // pulls every scheduled question once, whatever was pulled earlier that day.
-  const SCHEDULE_VERSION = '2026-10-22.4';
+  const SCHEDULE_VERSION = '2026-10-22.5';
   async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false, phase = 1 } = {}) {
     const now = new Date().toISOString();
     if (!force && (await getKV('schedule-version:' + phase)) !== SCHEDULE_VERSION) {
@@ -155,7 +162,7 @@ export function createApi(store) {
         loadedAt: sources.loadedAt,
         store: store.kind,
         sources: Object.fromEntries(SOURCE_NAMES.map((k) => [k, {
-          status: sources[k].status, stale: !!sources[k].stale, daily: isDaily(k), everyHours: EVERY_HOURS[k] || null, loadedAt: sources[k].loadedAt, origin: sources[k].origin, rows: sources[k].rawRows ?? sources[k].rows.length, error: sources[k].error || null,
+          status: sources[k].status, stale: !!sources[k].stale, fallback: !!sources[k].fallback, daily: isDaily(k), everyHours: EVERY_HOURS[k] || null, loadedAt: sources[k].loadedAt, origin: sources[k].origin, rows: sources[k].rawRows ?? sources[k].rows.length, error: sources[k].error || null,
           columns: Object.keys(sources[k].rows[0] || {}), sample: sampleTypes(sources[k].rows)
         }]))
       },
@@ -194,6 +201,20 @@ export function createApi(store) {
     if (!authorised(req)) return new Response('Password required', { status: 401, headers: { 'www-authenticate': 'Basic realm="Khoj Control Room"' } });
 
     if (p === '/api/sources' && req.method === 'GET') return json(200, { sources: SOURCE_NAMES.map((n) => ({ name: n, label: SOURCE_LABELS[n] })) });
+    // A stale copy of a scheduled question (gzipped JSON of compact rows), used whenever Metabase hasn't delivered it.
+    const fbMatch = p.match(/^\/api\/fallback\/([A-Za-z]+)$/);
+    if (fbMatch && req.method === 'POST') {
+      if (!DAILY_SOURCES.includes(fbMatch[1])) return json(404, { error: 'Not a scheduled question' });
+      const buf = Buffer.from(await req.arrayBuffer());
+      if (buf.length > 5_800_000) return json(413, { error: 'File too large after compression' });
+      let body;
+      try { body = JSON.parse(zlib.gunzipSync(buf).toString('utf8')); } catch { return json(400, { error: 'Expected gzipped JSON' }); }
+      if (!Array.isArray(body.rows) || !body.rows.length) return json(400, { error: 'No rows' });
+      const fb = { rows: body.rows, rawRows: body.rawRows || body.rows.length, origin: `uploaded file ${String(body.name || '').slice(0, 80)}`, loadedAt: body.fileDate || new Date().toISOString(), uploadedAt: new Date().toISOString() };
+      await setKV('fallback:' + fbMatch[1], fb);
+      mem[fbMatch[1]] = undefined;
+      return json(200, { ok: true, rows: fb.rows.length, rawRows: fb.rawRows });
+    }
     // Ask the scheduled job to pull a scheduled question again on its next check (e.g. after editing the question).
     const repull = p.match(/^\/api\/sources\/([A-Za-z]+)\/repull$/);
     if (repull && req.method === 'POST') {

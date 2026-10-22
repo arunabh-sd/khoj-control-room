@@ -5,7 +5,7 @@ import path from 'node:path';
 import { parseCsv } from './csv.js';
 import { runCard, normRow } from './metabase.js';
 import { compactUniverse } from './universe.js';
-import { compactHistory } from './history.js';
+import { compactHistory, compactBrowsing } from './history.js';
 
 const SOURCES = {
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products', everyHours: 3 },
@@ -14,6 +14,7 @@ const SOURCES = {
   adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' },
   overlap: { env: 'MB_Q_OVERLAP', file: 'overlap.csv', label: 'Khoj × parent seller buyer overlap', everyHours: 24 },
   history: { env: 'MB_Q_CUSTOMER_HISTORY', file: 'history.csv', label: 'Khoj buyers\' ShopDeck order history (12 months)', compact: compactHistory, everyHours: 24 },
+  browsing: { env: 'MB_Q_BROWSING', file: 'browsing.csv', label: 'Khoj buyers\' browsing on ShopDeck sites', compact: compactBrowsing, everyHours: 24 },
   // Phase 2: asked about Khoj plus the parent sellers of Khoj's ordered products (passed as {{parent_sellers}}),
   // so they run after products and order history, at half past the hour.
   events: { env: 'MB_Q_EVENTS', file: 'events.csv', label: 'Site sessions: Khoj vs parent sellers', everyHours: 24, phase: 2 },

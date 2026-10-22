@@ -88,6 +88,18 @@ export function categoryFromName(name) {
   return null;
 }
 
+// Browsing rows (customer × seller × product × day, first view): { c, s, p, t, v }.
+export function compactBrowsing(rows) {
+  if (rows.length && 'c' in rows[0] && 't' in rows[0]) return rows;
+  const out = [];
+  for (const r of rows) {
+    const t = parseTs(r.first_view ?? r.created_at);
+    if (t === null || !r.customer_id) continue;
+    out.push({ c: String(r.customer_id), s: String(r.seller_id || ''), p: String(r.product_id || ''), t, v: num(r.views) || 1 });
+  }
+  return out;
+}
+
 // ---------- analysis ----------
 const DAY = 1440;
 const median = (xs) => { if (!xs.length) return null; const a = [...xs].sort((x, y) => x - y), m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
@@ -281,10 +293,41 @@ export function analyseHistory(rows, ctx) {
     out.active = sigs.length > 0;
     return out;
   };
-  const hits = kOrders.map((o) => ({ o, w: Object.fromEntries(P_WINDOWS.map((w) => [w, hitAt(o, w)])) }));
+  // Browsing on ShopDeck sites (product pages), when the browsing question is connected.
+  const browse = new Map();
+  for (const b of ctx.browsing || []) (browse.get(b.c) || browse.set(b.c, []).get(b.c)).push(b);
+  const lineCat = new Map();
+  for (const x of rows) if (x.s !== K && x.p && !lineCat.has(x.p)) { const c = catOfLine(x); if (c.cat || c.l4) lineCat.set(x.p, c); }
+  const sellerToKhojP = new Map([...ctx.khojToSellerProduct.entries()].map(([k, sp]) => [sp, k]));
+  const browseCat = (b) => {
+    const kid = sellerToKhojP.get(b.p) || (ctx.idx.byId.get(b.p) ? b.p : null);
+    if (kid && ctx.idx.byId.get(kid)) { const p = ctx.idx.byId.get(kid); return { l4: p.l4 || null, cat: p.cat }; }
+    return ctx.sellerProductCat.get(b.p) || lineCat.get(b.p) || { l4: null, cat: null };
+  };
+  const B_LEVELS = [
+    ['b_product', 'Browsed the same product', (b, p) => b.p === p.id || b.p === ctx.khojToSellerProduct.get(p.id)],
+    ['b_seller', 'Browsed the same parent seller', (b, p) => b.s === p.seller],
+    ['b_l4', 'Browsed the same L4 category', (b, p) => !!p.l4 && browseCat(b).l4 === p.l4],
+    ['b_cat', 'Browsed the same test category', (b, p) => p.cat !== 'Other' && browseCat(b).cat === p.cat]
+  ];
+  const browseHit = (o, w) => {
+    const bs = (browse.get(o.cu.c) || []).filter((b) => b.t < o.x.t && o.x.t - b.t <= w * DAY);
+    const out = {};
+    for (const [k, , f] of B_LEVELS) out[k] = bs.some((b) => f(b, o.p));
+    out.b_any = Object.values(out).some(Boolean);
+    out.b_active = bs.length > 0;
+    return out;
+  };
+  const hasBrowsing = browse.size > 0;
+  const hits = kOrders.map((o) => ({ o, w: Object.fromEntries(P_WINDOWS.map((w) => { const h = hitAt(o, w); if (hasBrowsing) { Object.assign(h, browseHit(o, w)); h.all_any = h.any || h.b_any; } return [w, h]; })) }));
   const personalisation = {
     orders: kOrders.length, windows: P_WINDOWS,
     levels: P_LEVELS.map(([key, label]) => ({ key, label, ...Object.fromEntries(P_WINDOWS.map((w) => [`d${w}`, pct(hits.filter((h) => h.w[w][key]).length, hits.length)])) })),
+    browsing: !hasBrowsing ? null : {
+      linkedBuyers: pct(custs.filter((cu) => browse.has(cu.c)).length, custs.length),
+      levels: [...B_LEVELS, ['b_any', 'Browsed any of these'], ['all_any', 'Orders or browsing: any signal']].map(([key, label]) => ({ key, label, ...Object.fromEntries(P_WINDOWS.map((w) => [`d${w}`, pct(hits.filter((h) => h.w[w][key]).length, hits.length)])) })),
+      active: Object.fromEntries(P_WINDOWS.map((w) => [`d${w}`, pct(hits.filter((h) => h.w[w].b_active).length, hits.length)]))
+    },
     active: Object.fromEntries(P_WINDOWS.map((w) => [`d${w}`, pct(hits.filter((h) => h.w[w].active).length, hits.length)])),
     byCat: (() => {
       const m = new Map();
@@ -369,12 +412,23 @@ export function analyseHistory(rows, ctx) {
     if (lastGap !== null && lastGap <= 7) reads.push(lastGap === 0 ? 'Bought on ShopDeck the same day, before Khoj' : `Bought on ShopDeck ${lastGap} day${lastGap > 1 ? 's' : ''} before Khoj`);
     if (repeatLines.length) { const rp = repeatLines.map(kp).filter(Boolean); reads.push(`Came back to Khoj${rp.some((p) => !ps.has(p.seller)) ? ' for another seller\'s product' : ''}`); }
     else if (otherAfter) reads.push(`Since bought from ${otherAfter} other ShopDeck seller${otherAfter > 1 ? 's' : ''}, not Khoj`);
+    const bs = (browse.get(cu.c) || []).filter((b) => b.t < cu.fk && cu.fk - b.t <= 7 * DAY);
+    if (bs.length) {
+      const bc = [...new Set(bs.map((b) => browseCat(b).cat).filter((c) => c && c !== 'Other'))];
+      const sameP = cu.firstProducts.some((p) => bs.some((b) => b.p === ctx.khojToSellerProduct.get(p.id) || b.p === p.id));
+      reads.push(sameP ? 'Browsed this very product on a seller site in the week before' : `Browsed ${bc.length ? bc.join(', ') : 'products'} on ${new Set(bs.map((b) => b.s)).size} ShopDeck site${new Set(bs.map((b) => b.s)).size > 1 ? 's' : ''} in the week before`);
+    }
     if (firstState === 'R') reads.push('First Khoj order returned (RTO)');
     const steps = cu.all.filter((x) => x.st !== 'C').slice(-12).map((x) => {
       const p = x.s === K ? kp(x) : null;
       const sid = x.s === K ? (p?.seller || '') : x.s;
       return { t: x.t, khoj: x.s === K, cat: catOfLine(x).cat, l4: catOfLine(x).l4, name: p ? p.title.slice(0, 70) : (x.n || null), seller: sellerName.get(sid) || (sid ? '…' + sid.slice(-6) : ''), st: x.st, g: Math.round(x.g) };
     });
+    const browseSteps = (browse.get(cu.c) || []).filter((b) => b.t < cu.fk).slice(-6).map((b) => {
+      const kid = sellerToKhojP.get(b.p); const kpp = kid ? ctx.idx.byId.get(kid) : null; const c = browseCat(b);
+      return { t: b.t, khoj: false, browse: true, cat: c.cat, l4: c.l4, name: kpp ? kpp.title.slice(0, 70) : null, seller: sellerName.get(b.s) || (b.s ? '…' + b.s.slice(-6) : ''), st: 'B', g: 0, views: b.v };
+    });
+    steps.push(...browseSteps); steps.sort((a, b) => a.t - b.t);
     return {
       id: cu.c, type: userType(cu), state: cu.reg, khojCat, firstKhoj: cu.fk, khojOrders: new Set(cu.khoj.map((x) => x.o)).size,
       khojGmv: Math.round(cu.khoj.reduce((a, x) => a + x.g, 0)), pay: isCod(cu.firstLines[0].pm) ? 'COD' : 'Prepaid', firstState,
