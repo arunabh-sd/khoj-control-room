@@ -17,7 +17,8 @@ order_users AS (
   JOIN `nushop.orderitems` oi ON oi.order_id = e.order_id
   JOIN khoj_buyers k ON k.customer_id = oi.customer_id
   WHERE COALESCE(e.user_id, '') <> ''
-    AND DATE(e.created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 365 DAY)
+    AND e.created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
+    AND oi.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
 ),
 users AS (
   SELECT customer_id AS user_id, customer_id FROM khoj_buyers
