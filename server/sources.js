@@ -8,20 +8,21 @@ import { compactUniverse } from './universe.js';
 import { compactHistory } from './history.js';
 
 const SOURCES = {
-  products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products' },
+  products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products', everyHours: 3 },
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
   catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
   adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' },
-  overlap: { env: 'MB_Q_OVERLAP', file: 'overlap.csv', label: 'Khoj × parent seller buyer overlap', daily: true },
-  history: { env: 'MB_Q_CUSTOMER_HISTORY', file: 'history.csv', label: 'Khoj buyers\' ShopDeck order history (12 months)', compact: compactHistory, daily: true },
-  universe: { env: 'MB_Q_UNIVERSE', params: 'MB_Q_UNIVERSE_PARAMS', file: 'universe.csv', label: 'ShopDeck universe (PQ ≥ 3)', daily: true,
+  overlap: { env: 'MB_Q_OVERLAP', file: 'overlap.csv', label: 'Khoj × parent seller buyer overlap', everyHours: 24 },
+  history: { env: 'MB_Q_CUSTOMER_HISTORY', file: 'history.csv', label: 'Khoj buyers\' ShopDeck order history (12 months)', compact: compactHistory, everyHours: 24 },
+  universe: { env: 'MB_Q_UNIVERSE', params: 'MB_Q_UNIVERSE_PARAMS', file: 'universe.csv', label: 'ShopDeck universe (PQ ≥ 3)', everyHours: 24,
     compact: (rows) => compactUniverse(rows, { minPq: Number(process.env.UNIVERSE_MIN_PQ ?? 3) }) }
 };
 export const SOURCE_NAMES = Object.keys(SOURCES);
 export const SOURCE_LABELS = Object.fromEntries(SOURCE_NAMES.map((k) => [k, SOURCES[k].label]));
-// Heavy questions that change slowly: pulled once a day by the scheduled function (netlify/functions/daily.mjs),
-// never on page load or Refresh.
-export const DAILY_SOURCES = SOURCE_NAMES.filter((k) => SOURCES[k].daily);
+// Slow questions on a schedule (netlify/functions/daily.mjs), never on page load or Refresh:
+// universe, order history and overlap once a day; products (seller L30D numbers, slow to compute) every 3 hours.
+export const DAILY_SOURCES = SOURCE_NAMES.filter((k) => SOURCES[k].everyHours);
+export const EVERY_HOURS = Object.fromEntries(DAILY_SOURCES.map((k) => [k, SOURCES[k].everyHours]));
 
 export async function loadOne(name, { timeoutMs } = {}) {
   const src = SOURCES[name];

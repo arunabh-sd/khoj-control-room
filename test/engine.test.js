@@ -300,7 +300,7 @@ test('daily sources: pulled once a day, never on page load once there is a pull'
     res.end(JSON.stringify(id === '57' ? [{ seller_id: 's', seller_product_id: 'a', category_l2: 'womens-clothing', category_l3: 'ethnic-wear', category_l4: 'sarees', l30d_orders: 5 }] : []));
   });
   await new Promise((r) => srv.listen(0, r));
-  const env = { METABASE_URL: `http://localhost:${srv.address().port}`, METABASE_API_KEY: 'k', MB_Q_PRODUCTS: '50', MB_Q_UNIVERSE: '57', DATA_DIR: '' };
+  const env = { METABASE_URL: `http://localhost:${srv.address().port}`, METABASE_API_KEY: 'k', MB_Q_ADS: '50', MB_Q_UNIVERSE: '57', DATA_DIR: '' };
   const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
   Object.assign(process.env, env); delete process.env.DATA_DIR;
   try {
@@ -317,8 +317,8 @@ test('daily sources: pulled once a day, never on page load once there is a pull'
     assert.equal(calls['57'], 1);
     await api.runDaily({ force: true });
     assert.equal(calls['57'], 2);
-    await post('products'); await post('products');
-    assert.equal(calls['50'], 2);                             // normal sources pull on every load
+    await post('ads'); await post('ads');
+    assert.equal(calls['50'], 2);                             // page-load sources pull on every load
     const state = await api.handle(new Request('http://x/api/state')).then((r) => r.json());
     assert.equal(state.meta.sources.universe.daily, true);
     assert.equal(calls['57'], 2);

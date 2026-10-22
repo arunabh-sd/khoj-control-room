@@ -1,6 +1,6 @@
 // Platform-neutral API: a function from a web-standard Request to a Response.
 // Used by the Netlify Function (netlify/functions/api.mjs) and by the local Node server (server/index.js).
-import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES } from './sources.js';
+import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES, EVERY_HOURS } from './sources.js';
 import { compute, todayIST } from './engine.js';
 import { DEFAULT_SETTINGS, SETTING_LABELS, mergeSettings } from './rules.js';
 
@@ -69,17 +69,23 @@ export function createApi(store) {
     return { ...(await refreshSource(name)), daily: true };
   }
 
-  // Scheduled (hourly): pulls each daily source once per IST day, with a longer timeout. Retries next hour if it
-  // failed, at most 3 tries a day.
+  // Scheduled (hourly): pulls each scheduled source once per period (IST day, or every N hours), with a longer
+  // timeout. A failed pull is retried next hour, at most 3 tries per period.
+  const periodOf = (name, iso) => {
+    const h = EVERY_HOURS[name] || 24;
+    const ist = new Date(new Date(iso).getTime() + 330 * 60000);
+    return h >= 24 ? ist.toISOString().slice(0, 10) : `${ist.toISOString().slice(0, 10)}#${Math.floor(ist.getUTCHours() / h)}`;
+  };
   async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false } = {}) {
-    const today = istDay(new Date().toISOString());
+    const now = new Date().toISOString();
     return Promise.all(DAILY_SOURCES.map(async (name) => {
+      const period = periodOf(name, now);
       const meta = await getKV('meta:' + name);
-      if (!force && meta && meta.status === 'ok' && istDay(meta.loadedAt) === today) return { name, skipped: 'already pulled today' };
+      if (!force && meta && meta.status === 'ok' && periodOf(name, meta.loadedAt) === period) return { name, skipped: EVERY_HOURS[name] >= 24 ? 'already pulled today' : `already pulled in this ${EVERY_HOURS[name]}-hour window` };
       const tries = await getKV('tries:' + name);
-      const n = tries && tries.day === today ? tries.n : 0;
-      if (!force && n >= 3) return { name, skipped: '3 failed tries today' };
-      await setKV('tries:' + name, { day: today, n: n + 1 });
+      const n = tries && tries.period === period ? tries.n : 0;
+      if (!force && n >= 3) return { name, skipped: '3 failed tries this period' };
+      await setKV('tries:' + name, { period, n: n + 1 });
       const r = await refreshSource(name, { timeoutMs });
       return { name, status: r.status, rows: r.rawRows ?? r.rows.length, error: r.error || null };
     }));
@@ -117,7 +123,7 @@ export function createApi(store) {
         loadedAt: sources.loadedAt,
         store: store.kind,
         sources: Object.fromEntries(SOURCE_NAMES.map((k) => [k, {
-          status: sources[k].status, stale: !!sources[k].stale, daily: isDaily(k), loadedAt: sources[k].loadedAt, origin: sources[k].origin, rows: sources[k].rawRows ?? sources[k].rows.length, error: sources[k].error || null,
+          status: sources[k].status, stale: !!sources[k].stale, daily: isDaily(k), everyHours: EVERY_HOURS[k] || null, loadedAt: sources[k].loadedAt, origin: sources[k].origin, rows: sources[k].rawRows ?? sources[k].rows.length, error: sources[k].error || null,
           columns: Object.keys(sources[k].rows[0] || {}), sample: sampleTypes(sources[k].rows)
         }]))
       },
@@ -160,7 +166,7 @@ export function createApi(store) {
     if (srcMatch && req.method === 'POST') {
       if (!SOURCE_NAMES.includes(srcMatch[1])) return json(404, { error: 'Unknown source' });
       const r = await pageRefresh(srcMatch[1]);
-      return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, daily: !!r.daily, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
+      return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, daily: !!r.daily, everyHours: EVERY_HOURS[srcMatch[1]] || null, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
     if (p === '/api/state' && req.method === 'GET') return json(200, await buildState());
 
