@@ -2,7 +2,6 @@
 // Used by the Netlify Function (netlify/functions/api.mjs) and by the local Node server (server/index.js).
 import { loadOne, SOURCE_NAMES, SOURCE_LABELS } from './sources.js';
 import { compute, todayIST } from './engine.js';
-import { saveMetaUpload, loadMetaUpload, clearMetaUpload } from './uploads.js';
 import { DEFAULT_SETTINGS, SETTING_LABELS, mergeSettings } from './rules.js';
 
 // For the Data sources panel: what each column looks like in the first rows (type and a short shape, no values).
@@ -39,7 +38,6 @@ export function createApi(store) {
     const sources = {};
     for (const name of SOURCE_NAMES) sources[name] = await getSource(name);
     sources.loadedAt = SOURCE_NAMES.map((n) => sources[n].loadedAt).filter(Boolean).sort()[0] || new Date().toISOString();
-    sources.metaUpload = await loadMetaUpload(store);
     const settings = mergeSettings(await store.getSettings());
     const history = await store.listDecisions();
     const result = compute(sources, settings, history);
@@ -114,19 +112,6 @@ export function createApi(store) {
       return json(200, { name: srcMatch[1], status: r.status, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
     if (p === '/api/state' && req.method === 'GET') return json(200, await buildState());
-    if (p === '/api/uploads/meta-products' && req.method === 'POST') {
-      const body = await readJson(req, 6_000_000);
-      try {
-        const file = await saveMetaUpload(store, body, todayIST());
-        return json(200, { ok: true, file });
-      } catch (e) {
-        return json(400, { error: e.message });
-      }
-    }
-    if (p === '/api/uploads/meta-products' && req.method === 'DELETE') {
-      await clearMetaUpload(store);
-      return json(200, { ok: true });
-    }
 
     const taskMatch = p.match(/^\/api\/tasks\/(.+)$/);
     if (taskMatch && req.method === 'POST') {

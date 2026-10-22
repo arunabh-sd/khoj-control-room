@@ -548,12 +548,9 @@ export function compute(src, s, history, today = todayIST()) {
   const looksTested = (p) => { const tw = new Set(words(p.title)); return unlinkedSigs.some((sig) => sig.every((w) => tw.has(w))); };
   const isTested = (p) => trialedIds.has(p.id) || testedTitles.has(titleKey(p.title)) || looksTested(p);
 
-  // Product signal, two views: spend distributed to products by PPO (Metabase) and Meta's own product breakdown (CSV uploads).
+  // Product signal: spend distributed to products by PPO (product-wise spend question).
   const catalog = buildCatalog(src.catalog.rows, idx, s, isTested);
   if (catalog.unlinked) notes.push(`${catalog.unlinked} product(s) in the product-wise spend question with enough spend don't match a Khoj product id or SKU id in the products question.`);
-  const metaRows = src.metaUpload?.rows || [];
-  const metaSignal = buildCatalog(metaRows, idx, s, isTested, { gmvFactor: s.metaSgmvFactor });
-  if (metaSignal.unlinked) notes.push(`${metaSignal.unlinked} product(s) in the uploaded Meta product breakdown with enough spend don't match a Khoj SKU id.`);
 
   // product outcome status
   const statusOf = new Map();
@@ -636,11 +633,9 @@ export function compute(src, s, history, today = todayIST()) {
     }
   }
 
-  // new trials to fill free slots; hits from either product signal view go first
+  // new trials to fill free slots; product signal hits go first
   const catalogHit = new Map();
-  for (const [view, list] of [['Meta breakdown', metaSignal.items], ['PPO-distributed', catalog.items]]) {
-    for (const c of list) if (c.read === 'hit' && !catalogHit.has(c.productId)) catalogHit.set(c.productId, { ...c, view });
-  }
+  for (const c of catalog.items) if (c.read === 'hit' && !catalogHit.has(c.productId)) catalogHit.set(c.productId, { ...c, view: 'PPO-distributed' });
   const everTrialed = trials.length;
   const controlEvery = s.controlShare > 0 ? Math.max(2, Math.round(100 / s.controlShare)) : Infinity;
   let pickCounter = everTrialed;
@@ -848,12 +843,6 @@ export function compute(src, s, history, today = todayIST()) {
   return {
     today, catAov, notes, kpis, killReview, overlap, customers,
     universe: hasUniverse ? { byCat: universe, hasAll: true, hasStatus: uHasStatus, origin: src.universe.origin } : null,
-    metaSignal: {
-      window: { from: metaSignal.from, to: metaSignal.to },
-      uploads: src.metaUpload?.files || [],
-      items: metaSignal.items.slice(0, 300).map(({ days, ...i }) => i),
-      summary: signalSummary(metaSignal)
-    },
     activeTrialKeys: trials.filter((t) => t.active).map((t) => t.id),
     coverage: coverageRows,
     pipeline, bySource, queue,

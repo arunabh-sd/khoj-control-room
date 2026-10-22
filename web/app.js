@@ -257,10 +257,7 @@ function ladderCard(d) {
 }
 
 function catalogCard(d) {
-  const views = { ppo: d.catalog, meta: d.metaSignal };
-  const counts = (v) => views[v].summary.filter((x) => inCat(x.key)).reduce((a, x) => a + x.readable, 0);
-  const sig = views[ui.sig] ? ui.sig : 'ppo';
-  const v = views[sig];
+  const v = d.catalog;
   const sums = v.summary.filter((x) => inCat(x.key));
   const t = (k) => sums.reduce((a, x) => a + x[k], 0);
   const items = v.items.filter((i) => inCat(i.cat) && i.read !== 'thin' && !i.trialed)
@@ -278,27 +275,9 @@ function catalogCard(d) {
     <td class="r"><div class="num ${i.sgmv !== null && i.sgmv <= d.settings.winBar ? 'good' : 'bad'}">${i.sgmv === null ? 'no GMV' : pc(i.sgmv)}${i.recentSgmv !== null ? ` <span class="small muted">${i.basis}</span>` : ''}</div><div class="num small muted">${i.recentSgmv === null ? '' : i.basis === 'recent' ? 'lifetime ' + pc(i.lifetimeSgmv) : 'recent ' + pc(i.recentSgmv)}</div></td>
     <td>${chip(...read[i.read])}</td>
     <td class="small">${i.read === 'hit' ? (i.live ? 'Queued for trial' : 'Hit, but not live on Khoj') : 'Moved down the queue'}</td></tr>`).join('');
-  const sub = sig === 'ppo'
-    ? `Catalog and other spend distributed to products by PPO (${esc(d.meta.sources.catalog.origin)}). Spend/GMV is accurate.`
-    : `Meta's own product breakdown, uploaded daily. Meta product ID = Khoj SKU id. Meta-reported GMV, so the ×${d.settings.metaSgmvFactor} correction applies.`;
-  const uploads = d.metaSignal.uploads || [];
-  const uploadBox = sig !== 'meta' ? '' : `<div class="upload">
-      <label class="btn btn-primary" for="metaUpload">${ui.uploading ? 'Uploading…' : 'Upload today\'s Meta CSV'}</label>
-      <input type="file" id="metaUpload" accept=".csv,text/csv" ${ui.uploading ? 'disabled' : ''} hidden>
-      <span class="muted small">Ads Manager → Breakdown → By dynamic creative element → Product ID, by Day. Columns used: Product ID, Day, Amount spent, Purchases conversion value. Re-uploading a day replaces it.</span>
-      ${uploads.length ? `<details><summary class="small">Uploads (${uploads.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${uploads.map((f) => `<li>${esc(f.name)} · ${int(f.rows)} rows · ${fmtDate(f.from)}${f.to !== f.from ? ' – ' + fmtDate(f.to) : ''} · uploaded ${fmtDate(f.at)}</li>`).join('')}</ul><button type="button" class="btn" id="clearUploads" style="margin-top:8px">Clear all uploads</button></details>` : ''}
-    </div>`;
-  const empty = sig === 'ppo'
-    ? (d.meta.sources.catalog.status === 'ok' ? 'No product outside testing has enough spend to read yet.' : 'Connect the product-wise spend question (MB_Q_PRODUCT_SPEND) to see this.')
-    : (uploads.length ? 'No product outside testing has enough spend to read yet.' : 'No Meta product breakdown uploaded yet.');
+  const empty = d.meta.sources.catalog.status === 'ok' ? 'No product outside testing has enough spend to read yet.' : 'Connect the product-wise spend question (MB_Q_PRODUCT_SPEND) to see this.';
   return `<section class="card" aria-label="Product signal">
-    <div class="card-head"><div><h2>Product signal · all campaigns incl. catalog ${chip('muted', 'Directional')}</h2><span class="muted small">Products not already in testing · eligible after ${inr(d.settings.catalogMinSpend)} lifetime spend, read on the better of lifetime and recent Spend/GMV (recent = last ${Math.round(d.settings.signalWindowShare * 100)}% of spend, min ${inr(d.settings.signalWindowMin)}) · feeds the trial queue, never Success%</span></div>
-      <div class="seg-tabs" role="tablist" aria-label="Spend view">
-        <button type="button" class="seg" role="tab" data-sig="ppo" aria-pressed="${sig === 'ppo'}">Distributed by PPO <span class="count num">${counts('ppo')}</span></button>
-        <button type="button" class="seg" role="tab" data-sig="meta" aria-pressed="${sig === 'meta'}">Not distributed · Meta <span class="count num">${counts('meta')}</span></button>
-      </div></div>
-    <p class="small muted">${sub}</p>
-    ${uploadBox}
+    <div class="card-head"><div><h2>Product signal · all campaigns incl. catalog ${chip('muted', 'Directional')}</h2><span class="muted small">Products not already in testing · spend distributed to products by PPO (${esc(d.meta.sources.catalog.origin)}) · eligible after ${inr(d.settings.catalogMinSpend)} lifetime spend, read on the better of lifetime and recent Spend/GMV (recent = last ${Math.round(d.settings.signalWindowShare * 100)}% of spend, min ${inr(d.settings.signalWindowMin)}) · feeds the trial queue, never Success%</span></div></div>
     <div class="kpis">${cards.map(([l, val, x]) => `<div class="kpi"><span class="label">${l}</span><span class="value num" style="font-size:22px">${val}</span><span class="sub">${esc(x)}</span></div>`).join('')}</div>
     ${rows ? `<div class="table-box"><table style="min-width:900px"><thead><tr><th>Product</th><th class="r">Lifetime spend</th><th class="r">Lifetime GMV</th><th class="r">Spend/GMV</th><th>Read</th><th>Decision</th></tr></thead><tbody>${rows}</tbody></table></div>`
       : `<p class="empty">${empty}</p>`}
@@ -632,17 +611,11 @@ function viewRules(d) {
 
 // ---------- events ----------
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-cat],[data-tab],[data-live],[data-sig],#refresh,#retry,#resetRules,#clearUploads');
+  const t = e.target.closest('[data-cat],[data-tab],[data-live],#refresh,#retry,#resetRules');
   if (!t) return;
   if (t.dataset.cat) { ui.cat = t.dataset.cat; remember(); render(); }
   else if (t.dataset.tab) { ui.tab = t.dataset.tab; remember(); render(); }
   else if (t.dataset.live) { ui.live = t.dataset.live; remember(); render(); }
-  else if (t.dataset.sig) { ui.sig = t.dataset.sig; remember(); render(); }
-  else if (t.id === 'clearUploads') {
-    if (!confirm('Delete every uploaded Meta product breakdown?')) return;
-    await fetch('/api/uploads/meta-products', { method: 'DELETE' });
-    load(false);
-  }
   else if (t.id === 'refresh' || t.id === 'retry') load(true);
   else if (t.id === 'resetRules') {
     if (!confirm('Reset every rule to its default?')) return;
@@ -653,23 +626,6 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('change', async (e) => {
   if (e.target.id === 'showDone') { ui.showDone = e.target.checked; remember(); render(); return; }
-  if (e.target.id === 'metaUpload') {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    ui.uploading = true; ui.msg = ''; ui.note = ''; render();
-    try {
-      if (file.size > 5_500_000) throw new Error('File is over 5.5 MB; export fewer days at a time');
-      const res = await fetch('/api/uploads/meta-products', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: file.name, text: await file.text() }) });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || res.statusText);
-      ui.note = `Uploaded ${file.name}: ${int(body.file.rows)} rows, ${fmtDate(body.file.from)}${body.file.to !== body.file.from ? ' – ' + fmtDate(body.file.to) : ''}.`;
-    } catch (err) {
-      ui.msg = 'Upload failed: ' + err.message;
-    }
-    ui.uploading = false;
-    await load(false);
-    return;
-  }
   const id = e.target.dataset.task;
   if (!id) return;
   const done = e.target.checked;

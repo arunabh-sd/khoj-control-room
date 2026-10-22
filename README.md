@@ -135,9 +135,6 @@ WHERE o.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 365 DAY)
 - Khoj vs site price: Khoj unit price ÷ the median unit price these customers paid for the same product on the parent seller's site (product mapped through the universe question).
 - State comes from the pincode's first three digits.
 
-### Meta product breakdown (CSV upload)
-
-Product signal → "Not distributed · Meta" takes a daily CSV from Ads Manager (Breakdown → By dynamic creative element → Product ID, by Day). Columns used: Product ID (= Khoj SKU id), Day, Amount spent, Purchases conversion value. Re-uploading a day replaces it; 120 days are kept. Meta-reported GMV, so the ×0.9 correction applies.
 
 ## Rules (defaults)
 
