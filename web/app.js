@@ -336,7 +336,7 @@ function sourcesCard(d) {
   const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', events: 'Site sessions vs parent sellers', benchmark: 'Repeat benchmark (parent sellers)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
-    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.fallback ? chip('amber', `Repo copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
+    <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.fallback ? chip('amber', `Repo copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.rows ? `<a class="small" href="/api/sources/${esc(k)}.csv" download>Download the rows (CSV)</a>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
     <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”, except the slow ones on a schedule: products every 3 hours; universe, order history and buyer overlap once a day. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
   </section>`;
 }
@@ -673,7 +673,6 @@ function rcaCard(S) {
   ], D.rows, { min: 860 }) + `<p class="small muted">Of the gap in products per session: mix ${eff(D.mixEffect)}, behaviour within each group ${eff(D.rateEffect)}.</p>`;
   const sp = R.sameProduct;
   const body = `
-    <div style="display:flex;flex-direction:column;gap:8px">${R.findings.map((x) => `<div class="notice ${toneCls[x.tone] || 'notice-amber'}">${esc(x.text)}</div>`).join('')}</div>
     <div><div class="group-title">1 · Where the funnel loses orders</div><div style="margin-top:8px">${tbl([
       { h: 'Stage', v: (r) => esc(r.label) }, { h: 'Khoj', r: 1, v: (r) => pc(r.khoj, 1) }, { h: 'Sellers\' sites (Khoj-weighted)', r: 1, v: (r) => pc(r.bench, 1) },
       { h: 'Khoj vs them', r: 1, v: (r) => (r.gapPct === null ? '—' : `${r.gapPct >= 0 ? '+' : ''}${r.gapPct.toFixed(0)}%`), cls: (r) => (r.gapPct === null ? '' : r.gapPct < 0 ? 'bad' : 'good') },
@@ -683,37 +682,66 @@ function rcaCard(S) {
     ${R.sources ? `<div><div class="group-title">2b · Where they come from: traffic source</div><div style="margin-top:8px">${segTbl('Source (first page of the session)', R.sources)}</div></div>` : ''}
     ${R.devices ? `<div><div class="group-title">2c · Device</div><div style="margin-top:8px">${segTbl('Device', R.devices)}</div></div>` : ''}
     <div><div class="group-title">3 · What they land on: category</div><div style="margin-top:8px">${segTbl('Landing category', R.categories)}</div><p class="small muted">Landing category known for ${pc(R.landingCatCoverage)} of Khoj sessions.</p></div>
-    <div><div class="group-title">4 · Same product, two storefronts</div><p class="small muted" style="margin:6px 0 8px">New visitors landing on a Khoj product vs new visitors landing on the same product on its seller's own site · ${int(sp.products)} products, ${pc(sp.coverage)} of Khoj new-visitor sessions</p>
-      ${sp.products ? kpiRow([
-        ['Products per session', `${f2(sp.khojRate)} vs ${f2(sp.siteRate)}`, 'Khoj vs own site'],
-        ['Sessions viewing 2+ products', `${pc(sp.khojMulti)} vs ${pc(sp.siteMulti)}`, 'Khoj vs own site'],
-        ['Sessions with a buy-now click', `${pc(sp.khojBn, 1)} vs ${pc(sp.siteBn, 1)}`, 'Khoj vs own site']
-      ]) + tbl([
-        { h: 'Product (biggest gaps)', v: (r) => `${esc(r.name)} <span class="muted small">${esc(r.cat)}</span>` },
-        { h: 'Khoj sessions', r: 1, v: (r) => int(r.khojSessions) }, { h: 'Products / session: Khoj', r: 1, v: (r) => f2(r.khojRate) },
-        { h: 'Own site', r: 1, v: (r) => f2(r.siteRate) }, { h: 'Own-site sessions', r: 1, v: (r) => int(r.siteSessions) }
-      ], sp.worst, { min: 760 }) : '<p class="small muted">No product has enough sessions on both storefronts yet.</p>'}</div>
-    <div><div class="group-title">5 · How deep sessions go</div><div style="margin-top:8px">${tbl([
+    <div><div class="group-title">4 · How deep sessions go</div><div style="margin-top:8px">${tbl([
       { h: 'Products viewed in the session', v: (r) => esc(r.key) }, { h: 'Khoj', r: 1, v: (r) => pc(r.khoj) }, { h: 'Sellers\' sites', r: 1, v: (r) => pc(r.bench) },
       { h: 'Buy-now rate: Khoj', r: 1, v: (r) => pc(r.khojBn, 1) }, { h: 'Sellers\' sites', r: 1, v: (r) => pc(r.benchBn, 1) }
     ], R.depth)}</div></div>` : '<p class="small muted">Levels 2–5 need the updated site sessions query (sql/site_sessions.sql).</p>'}`;
-  return card('Explore RCA', 'Why is explore behaviour different on Khoj?', 'Root cause, from the funnel down to visitors, categories, the same product on both storefronts, and session depth · parent sellers weighted by Khoj orders', body);
+  return card('Seller-level detail', 'Seller-level detail', 'Not product-matched: each parent seller\'s whole site, weighted by Khoj orders. Context for the product-matched view above.', body);
+}
+
+function matchedRcaCard(S) {
+  const M = S.matched;
+  if (!M || !M.products) return '';
+  const toneCls = { bad: 'notice-orange', good: 'notice-green', info: 'notice-amber' };
+  const f2 = (v) => (v === null || v === undefined ? '—' : v.toFixed(2));
+  const eff = (v) => (v === null || v === undefined ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}`);
+  const segTbl = (title, D) => !D ? '' : tbl([
+    { h: title, v: (r) => esc(r.key === 'new' ? 'New visitors' : r.key === 'returning' ? 'Returning visitors' : r.key) },
+    { h: 'Share of sessions: Khoj', r: 1, v: (r) => pc(r.khojShare) }, { h: 'Seller sites, same products', r: 1, v: (r) => pc(r.benchShare) },
+    { h: 'Products / session: Khoj', r: 1, v: (r) => f2(r.khojRate) }, { h: 'Seller sites', r: 1, v: (r) => f2(r.benchRate), cls: (r) => (r.khojRate !== null && r.benchRate !== null && r.khojRate < r.benchRate ? 'bad' : '') },
+    { h: 'Buy-now: Khoj', r: 1, v: (r) => pc(r.khojBn, 1) }, { h: 'Seller sites', r: 1, v: (r) => pc(r.benchBn, 1) }
+  ], D.rows, { min: 900 }) + `<p class="small muted">Of the gap in products per session: mix ${eff(D.mixEffect)}, behaviour within each group ${eff(D.rateEffect)}.</p>`;
+  const body = `
+    <div style="display:flex;flex-direction:column;gap:8px">${M.findings.map((x) => `<div class="notice ${toneCls[x.tone] || 'notice-amber'}">${esc(x.text)}</div>`).join('')}</div>
+    <div><div class="group-title">A · Who comes to the same products: new vs returning visitors</div><div style="margin-top:8px">${segTbl('Visitors', M.visitors)}</div></div>
+    ${M.sources ? `<div><div class="group-title">B · Where they come from: traffic source, same products</div><div style="margin-top:8px">${segTbl('Source', M.sources)}</div></div>` : '<p class="small muted">B · Traffic source by product appears once Q16724 has the landing × source rows (sql/site_sessions.sql).</p>'}
+    <div><div class="group-title">C · By category</div><div style="margin-top:8px">${tbl([
+      { h: 'Category', v: (r) => esc(r.key) }, { h: 'Khoj sessions', r: 1, v: (r) => int(r.khojSessions) },
+      { h: 'Products / session: Khoj', r: 1, v: (r) => f2(r.khojRate) }, { h: 'Seller sites', r: 1, v: (r) => f2(r.benchRate), cls: (r) => (r.khojRate < r.benchRate ? 'bad' : '') },
+      { h: '2+ products: Khoj', r: 1, v: (r) => pc(r.khojMulti) }, { h: 'Seller sites', r: 1, v: (r) => pc(r.benchMulti) },
+      { h: 'Buy-now: Khoj', r: 1, v: (r) => pc(r.khojBn, 1) }, { h: 'Seller sites', r: 1, v: (r) => pc(r.benchBn, 1) },
+      { h: 'Effect on the gap', r: 1, v: (r) => eff(r.effect), cls: (r) => (r.effect < 0 ? 'bad' : 'good') }
+    ], M.categories, { min: 980 })}</div></div>
+    <div><div class="group-title">D · Products that drive the gap</div><div style="margin-top:8px">${tbl([
+      { h: 'First product', v: (r) => `${esc(r.name)} <span class="muted small">${esc(r.cat)}</span>` },
+      { h: 'Khoj sessions', r: 1, v: (r) => int(r.khojSessions) }, { h: 'Products / session: Khoj', r: 1, v: (r) => f2(r.khojRate) },
+      { h: 'Own site', r: 1, v: (r) => f2(r.siteRate) }, { h: 'Own-site sessions', r: 1, v: (r) => int(r.siteSessions) },
+      { h: 'Buy-now: Khoj', r: 1, v: (r) => pc(r.khojBn, 1) }, { h: 'Own site', r: 1, v: (r) => pc(r.siteBn, 1) },
+      { h: 'Effect on the gap', r: 1, v: (r) => eff(r.effect), cls: (r) => (r.effect < 0 ? 'bad' : 'good') }
+    ], M.drags, { min: 980 })}</div></div>`;
+  return card('Explore RCA', 'Why Khoj sessions explore less: root cause', `Product-matched: every Khoj session is compared with seller-site sessions that started on the same product, weighted to Khoj's first-product mix · ${int(M.products)} products, ${pc(M.coverage)} of Khoj sessions`, body);
 }
 
 function viewCross(d) {
   const S = d.sessions;
   const needs = planned('Cross-selling', 'Does an all-hero marketplace get people to explore and buy beyond the product in the ad?', [
-    ['Explore behaviour', ['Products viewed per session, sessions viewing 2+ products, time per session', 'Against the parent sellers\' own sites, weighted by Khoj orders']],
+    ['Explore behaviour', ['Products viewed per session, sessions viewing 2+ products, time per session', 'Against the same first products on the parent sellers\' own sites']],
     ['Beyond the landing product', ['Buy-now clicks on a product other than the first one viewed (the ad\'s product), same or another seller and category']]
   ], [DATA_EVENTS]);
   if (!S) return needs;
-  const B = S.beyond;
-  const explore = card('Explore behaviour', 'Explore behaviour: Khoj vs the parent sellers\' own sites', `Last 28 days · ${int(S.khojSessions)} Khoj sessions · parent sellers weighted by Khoj orders (${int(S.parentSellers)} sellers)`, tbl([
-    { h: 'Metric', v: (m) => esc(m.label) },
-    { h: 'Khoj', r: 1, v: (m) => benchCell(m.khoj, m.unit) },
-    { h: 'Parent sellers (Khoj-weighted)', r: 1, v: (m) => benchCell(m.bench, m.unit) },
-    { h: 'Khoj vs them', r: 1, v: (m) => (m.khoj === null || m.bench === null || !m.bench ? '—' : `${m.khoj >= m.bench ? '+' : ''}${(((m.khoj - m.bench) / m.bench) * 100).toFixed(0)}%`), cls: (m) => (m.khoj !== null && m.bench ? (m.khoj >= m.bench ? 'good' : 'bad') : '') }
-  ], S.metrics) + `<p class="small muted">Covers ${pc(S.metrics[0]?.coverage)} of Khoj orders: parent sellers with under 100 sessions are left out.</p>`);
+  const B = S.beyond, M = S.matched;
+  const diff = { h: 'Khoj vs them', r: 1, v: (m) => (m.khoj === null || m.bench === null || !m.bench ? '—' : `${m.khoj >= m.bench ? '+' : ''}${(((m.khoj - m.bench) / m.bench) * 100).toFixed(0)}%`), cls: (m) => (m.khoj !== null && m.bench ? ((m.key === 'singlePct' ? m.khoj <= m.bench : m.khoj >= m.bench) ? 'good' : 'bad') : '') };
+  const matchedOk = M && M.products > 0;
+  const after = S.metrics.filter((m) => ['buyNowToCheckout', 'checkoutToOrder', 'ordersPerSession'].includes(m.key));
+  const explore = matchedOk
+    ? card('Explore behaviour', 'Explore behaviour: Khoj vs the same products on their own sites', `Last 28 days · each Khoj session compared with seller-site sessions that started on the same product (first product page), weighted to Khoj's first-product mix · ${int(M.products)} products, ${pc(M.coverage)} of ${int(M.khojLandingSessions)} Khoj sessions`, tbl([
+        { h: 'Metric', v: (m) => esc(m.label) }, { h: 'Khoj', r: 1, v: (m) => benchCell(m.khoj, m.unit) },
+        { h: 'Same first products, seller sites', r: 1, v: (m) => benchCell(m.bench, m.unit) }, diff
+      ], M.metrics) + `<p class="small muted">Not matched: ${M.unmatched.map((u) => `${pc(u.share)} ${esc(u.reason)}`).join(' · ') || 'none'}. After the click (seller level, not product-matched): ${after.map((m) => `${esc(m.label)} ${benchCell(m.khoj, m.unit)} vs ${benchCell(m.bench, m.unit)}`).join(' · ')}.</p>`)
+    : card('Explore behaviour', 'Explore behaviour: Khoj vs the parent sellers\' own sites', `Last 28 days · ${int(S.khojSessions)} Khoj sessions · parent sellers weighted by Khoj orders (${int(S.parentSellers)} sellers) · product matching needs the landing rows from sql/site_sessions.sql`, tbl([
+        { h: 'Metric', v: (m) => esc(m.label) }, { h: 'Khoj', r: 1, v: (m) => benchCell(m.khoj, m.unit) },
+        { h: 'Parent sellers (Khoj-weighted)', r: 1, v: (m) => benchCell(m.bench, m.unit) }, diff
+      ], S.metrics));
   const beyond = card('Beyond the landing product', 'Beyond the landing product', `Khoj buy-now clicks by the session's first product page (in practice, the ad's product) · ${int(B.clicks)} session-product clicks`, kpiRow([
     ['Clicked a different product', pc(B.otherPct, 1), 'than the one they landed on'],
     ['…from another seller', pc(B.otherAnotherSellerPct, 1), 'of those, a different parent seller'],
@@ -723,7 +751,7 @@ function viewCross(d) {
     { h: 'Clicked buy-now on', v: (x) => `${esc(x.to)} <span class="muted small">${esc(x.toCat)}${x.sameSeller ? ' · same seller' : ''}</span>` },
     { h: 'Sessions', r: 1, v: (x) => int(x.sessions) }
   ], B.topPairs, { min: 760 }));
-  return rcaCard(S) + explore + beyond;
+  return explore + beyond + matchedRcaCard(S) + rcaCard(S);
 }
 
 // ---------- Rules ----------

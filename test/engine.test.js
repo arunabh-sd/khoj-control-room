@@ -392,3 +392,18 @@ test('personalisation: browsing the same product on a seller site before the Kho
   assert.equal(lv('b_seller').d7, 50);
   assert.equal(lv('all_any').d30, 50);
 });
+
+test('explore is product-matched: the seller-site base is weighted to Khoj sessions by first product', async () => {
+  const { analyseEvents } = await import('../server/benchmarks.js');
+  const idx = { byId: new Map([['kx', { id: 'kx', seller: 'A', cat: 'Saree', title: 'X' }], ['ky', { id: 'ky', seller: 'A', cat: 'Saree', title: 'Y' }]]), bySku: new Map(), byCode: new Map() };
+  const L = (seller, prod, sessions, products) => ({ kind: 'landing', seller_id: seller, landing_product: prod, visitor_type: 'new', sessions, products_viewed: products, multi_product_sessions: 0, buy_now_sessions: 0 });
+  const ev = analyseEvents([
+    { kind: 'seller', seller_id: 'K', sessions: 40, products_viewed: 40 }, { kind: 'seller', seller_id: 'A', sessions: 200, products_viewed: 300 },
+    L('K', 'kx', 10, 10), L('K', 'ky', 30, 30),
+    L('A', 'sx', 100, 200), L('A', 'sy', 100, 100)                 // X browses 2/session on the seller site, Y 1/session
+  ], { khojSellerId: 'K', weights: new Map([['A', 1]]), idx, khojToSellerProduct: new Map([['kx', 'sx'], ['ky', 'sy']]) });
+  const pps = ev.matched.metrics.find((m) => m.key === 'productsPerSession');
+  assert.equal(pps.khoj, 1);
+  assert.equal(pps.bench, (10 * 2 + 30 * 1) / 40);                  // 1.25, not the seller's overall 1.5
+  assert.equal(ev.matched.coverage, 100);
+});

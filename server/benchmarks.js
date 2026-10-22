@@ -220,6 +220,139 @@ export function analyseEvents(rows, { khojSellerId, weights, idx, khojToSellerPr
   }
   const known = other - unknown;
 
+  // ---------- product-matched: each Khoj session vs the parent site's sessions that started on the same product ----------
+  // For a Khoj landing product X (first product page of the session), the base is the parent seller's own-site
+  // sessions whose first product page was X's seller product. Base rates are averaged across products with Khoj's
+  // session counts as weights, so the base has exactly Khoj's first-product mix.
+  const MIN_BASE = 5;
+  const agg0 = () => ({ sessions: 0, ppo: 0, products: 0, multi: 0, secs: 0, bn: 0, multiBn: 0, co: 0 });
+  const addTo = (a, r) => { a.sessions += n(r.sessions); a.ppo += n(r.ppo); a.products += n(r.products_viewed); a.multi += n(r.multi_product_sessions); a.secs += n(r.secs); a.bn += n(r.buy_now_sessions); a.multiBn += n(r.multi_buy_now_sessions); a.co += n(r.checkout_sessions); return a; };
+  const index = (list, segOfRow) => {
+    const m = new Map();
+    for (const r of list) {
+      const key = `${r.seller_id}|${r.landing_product}`;
+      const e = m.get(key) || m.set(key, { all: agg0(), seg: new Map() }).get(key);
+      addTo(e.all, r);
+      const sg = segOfRow ? segOfRow(r) : null;
+      if (sg) addTo(e.seg.get(sg) || e.seg.set(sg, agg0()).get(sg), r);
+    }
+    return m;
+  };
+  const byLanding = index(landing, (r) => r.visitor_type || null);
+  const landSrc = rows.filter((r) => kindOf(r) === 'landing_src').map((r) => ({ ...r, seller_id: String(r.seller_id) }));
+  const bySrc = index(landSrc, (r) => r.bucket || null);
+  const baseKeyOf = (pid) => {
+    const p = prodById(pid); if (!p || !p.seller) return { p, key: null, why: p ? 'no parent seller' : 'not a Khoj product' };
+    const sp = khojToSellerProduct.get(p.id);
+    for (const id of [sp, p.id].filter(Boolean)) if (byLanding.has(`${p.seller}|${id}`)) return { p, key: `${p.seller}|${id}` };
+    return { p, key: null, why: sp ? 'seller site had no sessions starting on it' : 'no seller product id for it' };
+  };
+  const RATES = {
+    productsPerSession: (a) => a.products / a.sessions, ppoPerSession: (a) => a.ppo / a.sessions, multiProductPct: (a) => pct(a.multi, a.sessions),
+    singlePct: (a) => pct(a.sessions - a.multi, a.sessions), secsPerSession: (a) => a.secs / a.sessions, buyNowPct: (a) => pct(a.bn, a.sessions),
+    multiBuyNowPct: (a) => (a.bn ? pct(a.multiBn, a.bn) : null), buyNowToCheckout: (a) => (a.bn ? pct(a.co, a.bn) : null)
+  };
+  const LABELS = {
+    productsPerSession: 'Products viewed per session', ppoPerSession: 'Product page opens per session', multiProductPct: 'Sessions viewing 2+ products',
+    singlePct: 'Sessions that see only the first product', secsPerSession: 'Time per session (seconds)', buyNowPct: 'Sessions with a buy-now click',
+    multiBuyNowPct: 'Buy-now sessions with 2+ products clicked', buyNowToCheckout: 'Buy-now → checkout'
+  };
+  const matchedRows = [];
+  const unmatched = { sessions: 0, reasons: {} };
+  let khojLandingSessions = 0;
+  for (const [key, e] of byLanding) {
+    const [sid, pid] = key.split('|'); if (sid !== K) continue;
+    khojLandingSessions += e.all.sessions;
+    const { p, key: bkey, why } = baseKeyOf(pid);
+    const base = bkey ? byLanding.get(bkey) : null;
+    if (!base || base.all.sessions < MIN_BASE) {
+      unmatched.sessions += e.all.sessions;
+      const r = why || `fewer than ${MIN_BASE} seller-site sessions`; unmatched.reasons[r] = (unmatched.reasons[r] || 0) + e.all.sessions;
+      continue;
+    }
+    matchedRows.push({ pid, p, k: e, b: base, srcK: bySrc.get(key), srcB: bySrc.get(bkey) });
+  }
+  const W = matchedRows.reduce((a, m) => a + m.k.all.sessions, 0);
+  const wavg = (f) => { let w = 0, s = 0; for (const m of matchedRows) { const v = f(m); if (v === null || v === undefined || !Number.isFinite(v)) continue; w += m.k.all.sessions; s += v * m.k.all.sessions; } return w ? s / w : null; };
+  const matchedMetrics = Object.keys(RATES).map((key) => {
+    const f = RATES[key];
+    const kPool = matchedRows.reduce((a, m) => addTo(a, { sessions: m.k.all.sessions, ppo: m.k.all.ppo, products_viewed: m.k.all.products, multi_product_sessions: m.k.all.multi, secs: m.k.all.secs, buy_now_sessions: m.k.all.bn, multi_buy_now_sessions: m.k.all.multiBn, checkout_sessions: m.k.all.co }), agg0());
+    return { key, label: LABELS[key], unit: /Pct$|Checkout$/.test(key) ? 'pct' : 'num', khoj: kPool.sessions ? f(kPool) : null, bench: wavg((m) => f(m.b.all)) };
+  });
+  // Product-matched mix vs rate, for a segmentation that exists per landing product (visitor type, traffic source).
+  const matchedDecompose = (segGetter, minSeg = 3) => {
+    const keys = new Map();
+    for (const m of matchedRows) { const g = segGetter(m); if (!g) continue; for (const [k, a] of g.k) keys.set(k, (keys.get(k) || 0) + a.sessions); for (const k of g.b.keys()) if (!keys.has(k)) keys.set(k, 0); }
+    const order = [...keys.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+    let mixEffect = 0, rateEffect = 0;
+    const out = order.map((key) => {
+      let kS = 0, kP = 0, kM = 0, kB = 0, totK = 0, wShare = 0, share = 0, wRate = 0, rate = 0, multi = 0, bn = 0;
+      for (const m of matchedRows) {
+        const g = segGetter(m); if (!g) continue;
+        const ktot = [...g.k.values()].reduce((a, x) => a + x.sessions, 0), btot = [...g.b.values()].reduce((a, x) => a + x.sessions, 0);
+        if (!ktot || !btot) continue;
+        const ks = g.k.get(key), bs = g.b.get(key);
+        totK += ktot;
+        if (ks) { kS += ks.sessions; kP += ks.products; kM += ks.multi; kB += ks.bn; }
+        wShare += ktot; share += ktot * ((bs?.sessions || 0) / btot);
+        // Seller-site rate in this segment, averaged over products with Khoj's product weights (even where Khoj has none of this segment).
+        if (bs && bs.sessions >= minSeg) { const w = ks ? ks.sessions : ktot; wRate += w; rate += w * (bs.products / bs.sessions); multi += w * pct(bs.multi, bs.sessions); bn += w * pct(bs.bn, bs.sessions); }
+      }
+      const r = { key, khojShare: pct(kS, totK), benchShare: wShare ? (share / wShare) * 100 : null, khojRate: kS ? kP / kS : null, benchRate: wRate ? rate / wRate : null,
+        khojMulti: kS ? pct(kM, kS) : null, benchMulti: wRate ? multi / wRate : null, khojBn: kS ? pct(kB, kS) : null, benchBn: wRate ? bn / wRate : null, khojSessions: kS };
+      if (r.benchShare !== null && r.benchRate !== null && r.khojShare !== null) mixEffect += ((r.khojShare - r.benchShare) / 100) * r.benchRate;
+      if (r.khojRate !== null && r.benchRate !== null) rateEffect += (r.khojShare / 100) * (r.khojRate - r.benchRate);
+      return r;
+    });
+    return out.length ? { rows: out, mixEffect, rateEffect } : null;
+  };
+  const mVisitors = matchedDecompose((m) => ({ k: m.k.seg, b: m.b.seg }));
+  const mSources = landSrc.length ? matchedDecompose((m) => (m.srcK && m.srcB ? { k: m.srcK.seg, b: m.srcB.seg } : null)) : null;
+  // Which products drive the gap: each product's share of Khoj sessions × its gap in products per session.
+  const contrib = matchedRows.map((m) => {
+    const kr = m.k.all.products / m.k.all.sessions, br = m.b.all.products / m.b.all.sessions;
+    return { name: m.p.title, cat: m.p.cat, khojSessions: m.k.all.sessions, siteSessions: m.b.all.sessions, khojRate: kr, siteRate: br,
+      khojBn: pct(m.k.all.bn, m.k.all.sessions), siteBn: pct(m.b.all.bn, m.b.all.sessions), effect: W ? (m.k.all.sessions / W) * (kr - br) : 0 };
+  }).sort((a, b) => a.effect - b.effect);
+  const byCatM = (() => {
+    const m = new Map();
+    for (const x of matchedRows) { const c = x.p.cat || 'Other'; (m.get(c) || m.set(c, []).get(c)).push(x); }
+    return [...m.entries()].map(([key, list]) => {
+      const w = list.reduce((a, x) => a + x.k.all.sessions, 0);
+      const kAgg = list.reduce((a, x) => ({ s: a.s + x.k.all.sessions, p: a.p + x.k.all.products, m: a.m + x.k.all.multi, b: a.b + x.k.all.bn }), { s: 0, p: 0, m: 0, b: 0 });
+      const bw = (f) => list.reduce((a, x) => a + f(x.b.all) * x.k.all.sessions, 0) / w;
+      return { key, khojSessions: kAgg.s, share: pct(kAgg.s, W), khojRate: kAgg.p / kAgg.s, benchRate: bw((a) => a.products / a.sessions), khojMulti: pct(kAgg.m, kAgg.s), benchMulti: bw((a) => pct(a.multi, a.sessions)), khojBn: pct(kAgg.b, kAgg.s), benchBn: bw((a) => pct(a.bn, a.sessions)), effect: (kAgg.s / W) * (kAgg.p / kAgg.s - bw((a) => a.products / a.sessions)) };
+    }).sort((a, b) => b.khojSessions - a.khojSessions);
+  })();
+  const MM = Object.fromEntries(matchedMetrics.map((m) => [m.key, m]));
+  const mFindings = [];
+  const pps = MM.productsPerSession;
+  if (W && pps.khoj !== null && pps.bench) {
+    const gap = pps.khoj - pps.bench;
+    mFindings.push({ tone: gap < 0 ? 'bad' : 'good', text: `Same first product, weighted to Khoj's product mix: Khoj sessions view ${pps.khoj.toFixed(2)} products vs ${pps.bench.toFixed(2)} on the sellers' own sites (${gap >= 0 ? '+' : ''}${((gap / pps.bench) * 100).toFixed(0)}%). ${MM.singlePct.khoj?.toFixed(0)}% of Khoj sessions never leave the first product vs ${MM.singlePct.bench?.toFixed(0)}%.` });
+    const bnK = MM.buyNowPct.khoj, bnB = MM.buyNowPct.bench;
+    if (bnK !== null && bnB !== null) mFindings.push({ tone: 'info', text: bnK >= bnB && gap < 0
+      ? `Buy-now on the same products is ${bnK.toFixed(1)}% on Khoj vs ${bnB.toFixed(1)}%: Khoj visitors decide on the first product as often or more, they just don't look around. Consistent with Khoj's lower price on the same product (Audience tab) making the first product an easy yes.`
+      : `Buy-now on the same products is ${bnK.toFixed(1)}% on Khoj vs ${bnB.toFixed(1)}%, so less browsing comes with ${bnK < bnB ? 'less buying intent too' : 'more buying'}.` });
+    if (mVisitors) {
+      const nw = mVisitors.rows.find((r) => r.key === 'new');
+      mFindings.push({ tone: 'info', text: `Visitors, same products: ${nw?.khojShare?.toFixed(0) ?? '—'}% of Khoj sessions are new visitors vs ${nw?.benchShare?.toFixed(0) ?? '—'}% of seller-site sessions on those products. Mix explains ${mVisitors.mixEffect.toFixed(2)} of the ${gap.toFixed(2)} gap; within new visitors Khoj views ${nw?.khojRate?.toFixed(2) ?? '—'} vs ${nw?.benchRate?.toFixed(2) ?? '—'}.` });
+    }
+    if (mSources) {
+      const meta = mSources.rows.find((r) => r.key === 'Meta ads');
+      mFindings.push({ tone: 'info', text: `Traffic source, same products: ${meta?.khojShare?.toFixed(0) ?? '—'}% of Khoj sessions come from Meta ads vs ${meta?.benchShare?.toFixed(0) ?? '—'}% on the sellers' sites. Source mix explains ${mSources.mixEffect.toFixed(2)}; within the same source, ${mSources.rateEffect.toFixed(2)}.${meta && meta.khojRate !== null && meta.benchRate !== null ? ` Meta-ad sessions only: Khoj ${meta.khojRate.toFixed(2)} vs ${meta.benchRate.toFixed(2)}.` : ''}` });
+    }
+    const worstCat = byCatM.filter((c) => c.effect < 0).sort((a, b) => a.effect - b.effect)[0];
+    if (worstCat) mFindings.push({ tone: 'bad', text: `By category, ${worstCat.key} drives the most of the gap: ${worstCat.khojRate.toFixed(2)} vs ${worstCat.benchRate.toFixed(2)} products per session on ${worstCat.share.toFixed(0)}% of matched Khoj sessions.` });
+    const top3 = contrib.slice(0, 3).filter((c) => c.effect < 0);
+    if (top3.length) mFindings.push({ tone: 'info', text: `Three products account for ${((top3.reduce((a, c) => a + c.effect, 0) / gap) * 100).toFixed(0)}% of the gap: ${top3.map((c) => c.name.slice(0, 40)).join('; ')}.` });
+  }
+  const matched = {
+    products: matchedRows.length, coverage: pct(W, khojLandingSessions), khojLandingSessions, minBase: MIN_BASE,
+    unmatched: Object.entries(unmatched.reasons).map(([reason, sessions]) => ({ reason, share: pct(sessions, khojLandingSessions) })).sort((a, b) => b.share - a.share),
+    metrics: matchedMetrics, visitors: mVisitors, sources: mSources, categories: byCatM, drags: contrib.slice(0, 12), findings: mFindings
+  };
+
   // ---------- findings, in words ----------
   const findings = [];
   const P = M.productsPerSession;
@@ -251,7 +384,7 @@ export function analyseEvents(rows, { khojSellerId, weights, idx, khojToSellerPr
   if (stageWorst) findings.push({ tone: 'bad', text: `In the funnel, the biggest loss vs the sellers' sites is ${stageWorst.label.toLowerCase()} (${stageWorst.gapPct.toFixed(0)}%).` });
 
   return {
-    khojSessions: khoj ? n(khoj.sessions) : 0, metrics, parentSellers: others.length,
+    khojSessions: khoj ? n(khoj.sessions) : 0, metrics, parentSellers: others.length, matched,
     rca: { findings, funnel, visitors, sources, devices, metaNew, categories, landingCatCoverage, sameProduct, depth, secondView, hasLanding: landing.length > 0 },
     beyond: {
       clicks: total, otherPct: pct(other, total),

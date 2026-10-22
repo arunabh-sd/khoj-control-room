@@ -6,6 +6,7 @@
 -- kind = 'landing'    : per seller × landing product (first product page opened) × new/returning visitor
 -- kind = 'depth'      : per seller × products viewed in the session (1, 2, 3-5, 6+)
 -- kind = 'source'     : per seller × traffic source of the session's first page (from utm_source) × new/returning
+-- kind = 'landing_src': per seller × landing product × traffic source (product-matched source comparison)
 -- kind = 'device'     : per seller × device of the session's first page
 -- kind = 'khoj_next'  : Khoj only, landing product → second product viewed
 -- kind = 'khoj_click' : Khoj only, landing product → product that got the buy-now click
@@ -50,7 +51,7 @@ sessions AS (
            WHEN REGEXP_CONTAINS(LOWER(COALESCE(se.entry.utm_source, '')), r'facebook|^fb|instagram|^ig$|^meta') THEN 'Meta ads'
            WHEN REGEXP_CONTAINS(LOWER(COALESCE(se.entry.utm_source, '')), r'google|youtube') THEN 'Google'
            WHEN REGEXP_CONTAINS(LOWER(COALESCE(se.entry.utm_source, '')), r'whatsapp|^wa$|wati|interakt') THEN 'WhatsApp'
-           WHEN COALESCE(se.entry.utm_source, '') = '' THEN 'No UTM (direct, organic, saved link)'
+           WHEN COALESCE(se.entry.utm_source, '') = '' THEN 'No UTM (direct / organic)'
            ELSE 'Other UTM'
          END AS source,
          COALESCE(LOWER(se.entry.device), 'unknown') AS device,
@@ -128,6 +129,16 @@ SELECT 'source', seller_id,
   CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64)
 FROM s
 GROUP BY seller_id, source, visitor_type
+
+UNION ALL
+SELECT 'landing_src', seller_id,
+  CAST(landing_product AS STRING), CAST(NULL AS STRING), CAST(source AS STRING), CAST(NULL AS STRING),
+  COUNT(*), SUM(ppo), SUM(products), COUNTIF(products >= 2), SUM(secs),
+  COUNTIF(bn), COUNTIF(bn_products >= 2), COUNTIF(co), CAST(NULL AS INT64),
+  CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64), CAST(NULL AS INT64)
+FROM s
+GROUP BY seller_id, landing_product, source
+HAVING COUNT(*) >= 3 OR seller_id = '6aad1869bcb80ce92eb3389b'
 
 UNION ALL
 SELECT 'device', seller_id,

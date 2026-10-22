@@ -232,6 +232,16 @@ export function createApi(store) {
       await setKV('tries:' + repull[1], { period: null, n: 0 });
       return json(200, { ok: true });
     }
+    // The rows the dashboard is using for a source, as CSV (for checking the numbers or deeper analysis offline).
+    const csvMatch = p.match(/^\/api\/sources\/([A-Za-z]+)\.csv$/);
+    if (csvMatch && req.method === 'GET') {
+      if (!SOURCE_NAMES.includes(csvMatch[1])) return json(404, { error: 'Unknown source' });
+      const rows = (await getSource(csvMatch[1])).rows || [];
+      const cols = [...new Set(rows.slice(0, 2000).flatMap((r) => Object.keys(r)))];
+      const cell = (v) => { const s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      const body = [cols.join(','), ...rows.map((r) => cols.map((c) => cell(r[c])).join(','))].join('\n');
+      return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${csvMatch[1]}.csv"`, 'cache-control': 'no-store' } });
+    }
     const srcMatch = p.match(/^\/api\/sources\/([A-Za-z]+)$/);
     if (srcMatch && req.method === 'POST') {
       if (!SOURCE_NAMES.includes(srcMatch[1])) return json(404, { error: 'Unknown source' });
