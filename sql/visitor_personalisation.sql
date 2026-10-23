@@ -40,28 +40,26 @@ ordered AS (
   WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(session_id, '') <> ''
     AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
 ),
--- Who is behind each Khoj visitor: user_id seen on Khoj with that visitor (product pages, ShopDeck sign-in,
--- checkout, OTP).
-khoj_users AS (
-  SELECT DISTINCT visitor_id, user_id FROM (
-    SELECT visitor_id, user_id FROM khoj_ppo WHERE COALESCE(user_id, '') <> ''
-    UNION ALL
-    SELECT visitor_id, user_id FROM `events.sd_sso_token_exists`
-    WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
-      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
-    UNION ALL
-    SELECT visitor_id, user_id FROM `events.sd_sso_user_details_exists`
-    WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
-      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
-    UNION ALL
-    SELECT visitor_id, user_id FROM `events.checkout_initiated`
-    WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
-      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
-    UNION ALL
-    SELECT visitor_id, user_id FROM `events.otp_verification`
-    WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
-      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 14 DAY)
-  )
+-- Who is behind each Khoj session, as known WHEN THE SESSION STARTS (that is all a personalised landing could use):
+-- a user_id seen with that visitor on Khoj at or before the first page, from product pages or ShopDeck sign-in
+-- (an existing ShopDeck login on the device). Checkout and OTP are left out on purpose: they happen while buying,
+-- so counting them would make almost every buyer "known" and inflate known visitors' conversion.
+khoj_ids AS (
+  SELECT visitor_id, user_id, created_at FROM khoj_ppo WHERE COALESCE(user_id, '') <> ''
+  UNION ALL
+  SELECT visitor_id, user_id, created_at FROM `events.sd_sso_token_exists`
+  WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
+    AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
+  UNION ALL
+  SELECT visitor_id, user_id, created_at FROM `events.sd_sso_user_details_exists`
+  WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND COALESCE(user_id, '') <> '' AND COALESCE(visitor_id, '') <> ''
+    AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
+),
+session_user AS (
+  SELECT s.session_id, ARRAY_AGG(i.user_id ORDER BY i.created_at DESC LIMIT 1)[OFFSET(0)] AS user_id
+  FROM sess s
+  JOIN khoj_ids i ON i.visitor_id = s.visitor_id AND i.created_at <= TIMESTAMP_ADD(s.start_at, INTERVAL 2 MINUTE)
+  GROUP BY 1
 ),
 -- user_id → ShopDeck customer: the same id, or through an order the user placed.
 user_customer AS (
@@ -70,13 +68,13 @@ user_customer AS (
   JOIN `nushop.orderitems` oi ON oi.order_id = e.order_id
   WHERE e.created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
     AND oi.createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
-    AND e.user_id IN (SELECT user_id FROM khoj_users)
+    AND e.user_id IN (SELECT user_id FROM session_user)
   GROUP BY 1
 ),
-visitor_customer AS (
-  SELECT ku.visitor_id, ANY_VALUE(ku.user_id) AS user_id, ANY_VALUE(COALESCE(uc.customer_id, ku.user_id)) AS customer_id
-  FROM khoj_users ku
-  LEFT JOIN user_customer uc ON uc.user_id = ku.user_id
+visitor_customer AS (   -- one row per known user
+  SELECT su.user_id, ANY_VALUE(COALESCE(uc.customer_id, su.user_id)) AS customer_id
+  FROM (SELECT DISTINCT user_id FROM session_user) su
+  LEFT JOIN user_customer uc ON uc.user_id = su.user_id
   GROUP BY 1
 ),
 -- Signals before the session: orders on ShopDeck seller sites, and product pages browsed on them.
@@ -141,7 +139,8 @@ scored AS (
     LOGICAL_OR(g.seller_id = kp.parent_seller) AS m_seller,
     LOGICAL_OR(g.cat = kp.cat AND kp.cat != 'Other') AS m_cat
   FROM sess s
-  LEFT JOIN visitor_customer vc ON vc.visitor_id = s.visitor_id
+  LEFT JOIN session_user su ON su.session_id = s.session_id
+  LEFT JOIN visitor_customer vc ON vc.user_id = su.user_id
   LEFT JOIN kp ON kp.product_id = s.landing_product
   LEFT JOIN sigs g ON g.customer_id = vc.customer_id
                   AND g.signal_at < s.start_at AND g.signal_at >= TIMESTAMP_SUB(s.start_at, INTERVAL 30 DAY)

@@ -434,7 +434,7 @@ export function analyseVisitorPersonalisation(rows) {
   const sum = (list) => list.reduce((a, r) => ({ s: a.s + r.s, bn: a.bn + r.bn, o: a.o + r.o }), { s: 0, bn: 0, o: 0 });
   const all = sum(R);
   const stat = (key, label, list, note) => { const x = sum(list); return { key, label, note, sessions: x.s, share: pct(x.s, all.s), buyNowPct: pct(x.bn, x.s), conversionPct: pct(x.o, x.s), orders: x.o }; };
-  const LEVELS = [['same product', 'Landed on a product they had ordered or browsed'], ['same seller', 'Landed on a seller they had ordered from or browsed'], ['same category', 'Landed in a category they had ordered or browsed'], ['no match', 'Had a signal, landed on something unrelated'], ['no signal', 'Known to ShopDeck, no order or browse in 30 days'], ['not known', 'Not a known ShopDeck customer']];
+  const LEVELS = [['same product', 'Landed on a product they had ordered or browsed'], ['same seller', 'Landed on a seller they had ordered from or browsed'], ['same category', 'Landed in a category they had ordered or browsed'], ['no match', 'Had a signal, landed on something unrelated'], ['no signal', 'Identified, no ShopDeck order or browse in 30 days'], ['not known', 'Not identifiable when they landed']];
   const levels = LEVELS.map(([k, label]) => stat(k, label, R.filter((r) => r.level === k)));
   const L = Object.fromEntries(levels.map((l) => [l.key, l]));
   const matchedAll = stat('matched', 'Any match', R.filter((r) => ['same product', 'same seller', 'same category'].includes(r.level)));

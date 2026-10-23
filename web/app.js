@@ -561,7 +561,7 @@ function visitorPersonalisationCard(d) {
   const E = V.estimate;
   const up = (e) => (e ? `${pc(V.conversionPct, 2)} → ${pc(e.newConversionPct, 2)}` : '—');
   return card('Personalisation potential visitors', 'Personalisation potential · visitors', `${int(V.sessions)} Khoj sessions in the last 14 days. A signal = an order or a product page browsed on a ShopDeck seller site in the 30 days before the session. Conversion = sessions with an order.`, kpiRow([
-    ['Known ShopDeck customers', pc(V.linkedPct, 1), 'sessions where the visitor could be identified'],
+    ['Identified when they landed', pc(V.linkedPct, 1), 'signed in to ShopDeck on the device, so a landing could be personalised'],
     ['Had a signal in 30 days', pc(V.signalPct, 1), 'something to personalise on'],
     ['Landed on a match', pc(V.matchedPct, 1), `converted ${pc(V.matchedCr, 2)} vs ${pc(V.noMatchCr, 2)} when unrelated`],
     ['Conversion if personalised', up(E.conservative), E.conservative ? `+${pc(E.conservative.liftPct, 0)} orders (category match); up to ${pc(E.optimistic?.newConversionPct, 2)} at any-match rates` : 'needs matched and unmatched sessions']

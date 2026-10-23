@@ -179,7 +179,7 @@ The order history question is `sql/customer_history_q16717.sql`.
 
 ### Visitor personalisation (`MB_Q_PERSONALISE`)
 
-`sql/visitor_personalisation.sql`: every Khoj session in the last 14 days, grouped by whether the visitor is a known ShopDeck customer (user_id on Khoj events, tied to orders), whether they ordered or browsed on ShopDeck seller sites in the 30 days before, and whether the first product matched (same product, seller or test category). Needs a Metabase Text variable `khoj_products` (not required), filled by the dashboard with each Khoj product's parent seller, parent seller product and test category. The estimate gives "signal but unrelated landing" sessions the conversion of matched sessions; it is an upper bound until an A/B test.
+`sql/visitor_personalisation.sql`: every Khoj session in the last 14 days, grouped by whether the visitor was identifiable when the session started (user_id on Khoj product pages or ShopDeck sign-in at or before the first page; checkout and OTP left out so buyers are not counted as known after the fact), whether they ordered or browsed on ShopDeck seller sites in the 30 days before, and whether the first product matched (same product, seller or test category). Needs a Metabase Text variable `khoj_products` (not required), filled by the dashboard with each Khoj product's parent seller, parent seller product and test category. The estimate gives "signal but unrelated landing" sessions the conversion of matched sessions; it is an upper bound until an A/B test.
 
 ### Fallback copy of the universe
 
