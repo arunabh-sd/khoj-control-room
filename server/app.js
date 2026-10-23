@@ -120,8 +120,17 @@ export function createApi(store) {
   // Page load / Refresh. Daily sources are not pulled here: the page gets the last daily pull. Only if there has
   // never been a good pull does the page try once (at most once an hour), so a new setup isn't empty until the
   // scheduled run.
-  async function pageRefresh(name) {
-    if (!isDaily(name)) return refreshSource(name);
+  // Page load reuses a pull younger than PAGE_PULL_MINUTES (default 30), so reopening the page doesn't re-run Metabase
+  // questions and burn the API key's BigQuery quota; the Refresh button forces a pull.
+  async function pageRefresh(name, force = false) {
+    if (!isDaily(name)) {
+      const fresh = Number(process.env.PAGE_PULL_MINUTES ?? 30) * 60000;
+      if (!force && fresh > 0 && !process.env.DATA_DIR) {
+        const cur = mem[name] || (await getKV('source:' + name));
+        if (cur?.status === 'ok' && cur.loadedAt && Date.now() - new Date(cur.loadedAt).getTime() < fresh) { mem[name] = cur; return { ...cur, reused: true }; }
+      }
+      return refreshSource(name);
+    }
     const cur = await getSource(name);
     if (cur.status === 'ok') return { ...cur, daily: true };
     const attempt = await getKV('attempt:' + name);
@@ -157,6 +166,8 @@ export function createApi(store) {
       await setKV('running:' + name, { at: new Date().toISOString(), timeoutMs });
       const r = await refreshSource(name, { timeoutMs });
       await setKV('running:' + name, { at: null });
+      // Out of the API key's daily BigQuery quota: no point retrying until it resets.
+      if (/quota/i.test(r.error || '')) await setKV('tries:' + name, { period, n: 99 });
       return { name, status: r.status, rows: r.rawRows ?? r.rows.length, error: r.error || null };
     }));
   }
@@ -258,8 +269,8 @@ export function createApi(store) {
     const srcMatch = p.match(/^\/api\/sources\/([A-Za-z]+)$/);
     if (srcMatch && req.method === 'POST') {
       if (!SOURCE_NAMES.includes(srcMatch[1])) return json(404, { error: 'Unknown source' });
-      const r = await pageRefresh(srcMatch[1]);
-      return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, daily: !!r.daily, everyHours: EVERY_HOURS[srcMatch[1]] || null, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
+      const r = await pageRefresh(srcMatch[1], url.searchParams.get('force') === '1');
+      return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, daily: !!r.daily, reused: !!r.reused, everyHours: EVERY_HOURS[srcMatch[1]] || null, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
     if (p === '/api/state' && req.method === 'GET') return json(200, await buildState());
     if (p === '/api/customers' && req.method === 'GET') {

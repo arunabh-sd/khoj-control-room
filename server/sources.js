@@ -8,7 +8,7 @@ import { compactUniverse } from './universe.js';
 import { compactHistory, compactBrowsing } from './history.js';
 
 const SOURCES = {
-  products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products', everyHours: 3 },
+  products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products', everyHours: 6 },
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
   catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
   adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' },
@@ -28,7 +28,7 @@ const SOURCES = {
 export const SOURCE_NAMES = Object.keys(SOURCES);
 export const SOURCE_LABELS = Object.fromEntries(SOURCE_NAMES.map((k) => [k, SOURCES[k].label]));
 // Slow questions on a schedule (netlify/functions/daily.mjs), never on page load or Refresh:
-// universe, order history and overlap once a day; products (seller L30D numbers, slow to compute) every 3 hours.
+// universe, order history and overlap once a day; products (seller L30D numbers, slow to compute) every 6 hours.
 export const DAILY_SOURCES = SOURCE_NAMES.filter((k) => SOURCES[k].everyHours);
 export const EVERY_HOURS = Object.fromEntries(DAILY_SOURCES.map((k) => [k, SOURCES[k].everyHours]));
 export const PHASE = Object.fromEntries(DAILY_SOURCES.map((k) => [k, SOURCES[k].phase || 1]));

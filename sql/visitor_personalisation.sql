@@ -88,24 +88,21 @@ sig_orders AS (
     AND oi.customer_id IN (SELECT customer_id FROM visitor_customer)
     AND COALESCE(oi.seller_last_status, '') NOT IN ('enqueued', 'invalid', 'initiated')
 ),
-other_visitors AS (
-  SELECT DISTINCT visitor_id, user_id FROM (
-    SELECT visitor_id, user_id FROM `events.product_page_opened`
-    WHERE seller_id != '6aad1869bcb80ce92eb3389b' AND COALESCE(visitor_id, '') <> ''
-      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
-      AND user_id IN (SELECT user_id FROM visitor_customer)
-    UNION ALL
-    SELECT visitor_id, user_id FROM `events.sd_sso_token_exists`
-    WHERE seller_id != '6aad1869bcb80ce92eb3389b' AND COALESCE(visitor_id, '') <> ''
-      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
-      AND user_id IN (SELECT user_id FROM visitor_customer)
-  )
+-- Browsers on other ShopDeck sites tied to these users through ShopDeck sign-in (small table); product pages
+-- carry user_id themselves when signed in. One pass over product pages.
+sso_visitors AS (
+  SELECT visitor_id, ANY_VALUE(user_id) AS user_id
+  FROM `events.sd_sso_token_exists`
+  WHERE seller_id != '6aad1869bcb80ce92eb3389b' AND COALESCE(visitor_id, '') <> '' AND COALESCE(user_id, '') <> ''
+    AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
+    AND user_id IN (SELECT user_id FROM visitor_customer)
+  GROUP BY 1
 ),
 browse0 AS (
   SELECT vc.customer_id, p.seller_id, CAST(p.product_id AS STRING) AS product_id, MIN(p.created_at) AS signal_at
   FROM `events.product_page_opened` p
-  JOIN other_visitors ov ON ov.visitor_id = p.visitor_id
-  JOIN (SELECT DISTINCT user_id, customer_id FROM visitor_customer) vc ON vc.user_id = ov.user_id
+  LEFT JOIN sso_visitors sv ON sv.visitor_id = p.visitor_id
+  JOIN (SELECT DISTINCT user_id, customer_id FROM visitor_customer) vc ON vc.user_id = COALESCE(NULLIF(p.user_id, ''), sv.user_id)
   WHERE p.seller_id != '6aad1869bcb80ce92eb3389b'
     AND p.created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 45 DAY)
   GROUP BY 1, 2, 3, TIMESTAMP_TRUNC(p.created_at, DAY, 'Asia/Kolkata')

@@ -1,4 +1,4 @@
-// Netlify Scheduled Function: pulls the slow questions (products every 3 hours; universe, order history, buyer
+// Netlify Scheduled Function: pulls the slow questions (products every 6 hours; universe, order history, buyer
 // overlap once a day) outside the page's 10-second limit. Checks every 5 minutes but only calls Metabase for a
 // question that is due, with up to 3 tries per window, so the first run after a deploy comes within minutes.
 import { createStore } from '../../server/store.js';

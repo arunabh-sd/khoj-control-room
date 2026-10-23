@@ -71,7 +71,7 @@ function renderLoader() {
   $('refresh').textContent = now ? `${now.short}…` : 'Loading…';
 }
 
-async function load(pull = true) {
+async function load(pull = true, force = false) {
   if (ui.busy) return;
   ui.busy = true; ui.msg = ''; ui.custRows = null; renderChrome();
   try {
@@ -91,10 +91,10 @@ async function load(pull = true) {
       // One slow or failing question doesn't stop the page: it keeps that source's last good pull.
       let note;
       try {
-        const r = await fetch('/api/sources/' + names[i].name, { method: 'POST' });
+        const r = await fetch('/api/sources/' + names[i].name + (force ? '?force=1' : ''), { method: 'POST' });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(body.error || (r.status === 504 || r.status === 502 ? 'timed out' : r.statusText));
-        note = body.daily
+        note = body.reused ? `${int(body.rows)} rows · from ${fmtWhen(body.loadedAt)}` : body.daily
           ? (body.status === 'ok' ? `${body.everyHours >= 24 ? 'daily' : `every ${body.everyHours} h`} · pulled ${fmtWhen(body.loadedAt)}` : body.status === 'missing' ? 'waiting for the scheduled pull' : 'scheduled pull pending')
           : body.status === 'ok' ? `${int(body.rows)} rows` : body.status === 'missing' ? 'not connected' : body.stale ? 'failed · using last pull' : 'failed';
 
@@ -337,7 +337,7 @@ function sourcesCard(d) {
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.fallback ? chip('amber', `Repo copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.rows ? `<a class="small" href="/api/sources/${esc(k)}.csv" download>Download the rows (CSV)</a>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
-    <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”, except the slow ones on a schedule: products every 3 hours; universe, order history and buyer overlap once a day. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
+    <p class="muted small">Metabase is queried only when the page opens or you click “Refresh from Metabase”, except the slow ones on a schedule: products every 6 hours; universe, order history, overlap and the comparison questions once a day. Opening the page within 30 minutes of the last pull reuses it; the Refresh button always pulls. Ticking tasks and saving rules reuse that pull. Storage: ${{ postgres: 'Postgres', 'netlify-blobs': 'Netlify Blobs', memory: 'in memory' }[d.meta.store] || d.meta.store}.</p>
   </section>`;
 }
 
@@ -819,7 +819,7 @@ document.addEventListener('click', async (e) => {
   if (t.dataset.cat) { ui.cat = t.dataset.cat; remember(); render(); }
   else if (t.dataset.tab) { ui.tab = t.dataset.tab; remember(); render(); }
   else if (t.dataset.live) { ui.live = t.dataset.live; remember(); render(); }
-  else if (t.id === 'refresh' || t.id === 'retry') load(true);
+  else if (t.id === 'refresh' || t.id === 'retry') load(true, true);
   else if (t.id === 'resetRules') {
     if (!confirm('Reset every rule to its default?')) return;
     await fetch('/api/settings', { method: 'DELETE' });

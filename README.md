@@ -35,8 +35,8 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
 
 **When Metabase is called:**
-- Ads, ad set map and product-wise spend: when the page opens and when you click "Refresh from Metabase".
-- Products (Q16450): **every 3 hours** (its seller L30D numbers take Metabase more than the page's 10 seconds).
+- Ads, ad set map and product-wise spend: when you click "Refresh from Metabase", and when the page opens if the last pull is over 30 minutes old (`PAGE_PULL_MINUTES`).
+- Products (Q16450): **every 6 hours** (its seller L30D numbers take Metabase more than the page's 10 seconds).
 - Universe (Q16457), order history (Q16717) and buyer overlap (Q16494): **once a day**, by the scheduled function `netlify/functions/daily.mjs`. It checks every 5 minutes but only calls Metabase for a question not yet pulled in its window (IST), with a 25-second limit (`MB_DAILY_TIMEOUT_MS`) and at most 3 tries a day. Page loads use the last daily pull. The first check after a deploy pulls every scheduled question once. Scheduled functions run on the published production deploy only. Each question runs as its own request, with a progress bar per step. Ticking tasks and saving rules reuse the last pull and never query Metabase.
 
 **Limits to know:**

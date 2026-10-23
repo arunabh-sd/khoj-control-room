@@ -320,7 +320,9 @@ test('daily sources: pulled once a day, never on page load once there is a pull'
     await api.runDaily({ force: true, phase: 3 });
     assert.equal(calls['57'], 3);
     await post('ads'); await post('ads');
-    assert.equal(calls['50'], 2);                             // page-load sources pull on every load
+    assert.equal(calls['50'], 1);                             // page load within 30 minutes reuses the last pull
+    await api.handle(new Request('http://x/api/sources/ads?force=1', { method: 'POST' }));
+    assert.equal(calls['50'], 2);                             // the Refresh button always pulls
     const state = await api.handle(new Request('http://x/api/state')).then((r) => r.json());
     assert.equal(state.meta.sources.universe.daily, true);
     assert.equal(calls['57'], 3);
