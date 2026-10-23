@@ -39,6 +39,10 @@ function bundledFallback(name) {
   return bundled[name];
 }
 
+// Bump on a deploy that should refresh every source once: scheduled questions are pulled again on the next check, and
+// the first page load pulls the page-load questions instead of reusing an older pull.
+const DATA_VERSION = '2026-10-23.1';
+
 export function createApi(store) {
   const mem = {};   // warm-instance copy of the last Metabase pull per source
   let customerTable = null;
@@ -75,7 +79,7 @@ export function createApi(store) {
 
   async function refreshSource(name, opts = {}) {
     if (PHASE[name] === 2 && !opts.params) opts = { ...opts, params: await phase2Params(name) };
-    const result = await loadOne(name, opts);
+    const result = { ...(await loadOne(name, opts)), version: DATA_VERSION };
     if (result.status === 'error') {
       const prev = mem[name] || (await getKV('source:' + name));
       if (prev && prev.status === 'ok') {
@@ -128,7 +132,7 @@ export function createApi(store) {
       const fresh = Number(process.env.PAGE_PULL_MINUTES ?? 30) * 60000;
       if (!force && fresh > 0 && !process.env.DATA_DIR) {
         const cur = mem[name] || (await getKV('source:' + name));
-        if (cur?.status === 'ok' && cur.loadedAt && Date.now() - new Date(cur.loadedAt).getTime() < fresh) { mem[name] = cur; return { ...cur, reused: true }; }
+        if (cur?.status === 'ok' && cur.version === DATA_VERSION && cur.loadedAt && Date.now() - new Date(cur.loadedAt).getTime() < fresh) { mem[name] = cur; return { ...cur, reused: true }; }
       }
       return refreshSource(name);
     }
@@ -149,7 +153,7 @@ export function createApi(store) {
   };
   // Bump when a deploy changes what the scheduled questions need (columns, compaction): the next scheduled run then
   // pulls every scheduled question once, whatever was pulled earlier that day.
-  const SCHEDULE_VERSION = '2026-10-22.6';
+  const SCHEDULE_VERSION = DATA_VERSION;
   async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false, phase = 1 } = {}) {
     const now = new Date().toISOString();
     if (!force && (await getKV('schedule-version:' + phase)) !== SCHEDULE_VERSION) {

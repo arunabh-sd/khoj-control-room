@@ -31,7 +31,7 @@ export const DEFAULT_SETTINGS = {
   lifecycleDays: 14,            // days above winBar at the floor budget = lifecycle ended
 
   // Product signal (overall product-wise spend, all campaigns incl. catalog)
-  catalogMinSpend: 1500,        // eligibility: lifetime spend on the product
+  catalogMinSpend: 1000,        // eligibility: lifetime spend on the product
   signalWindowShare: 0.5,       // performance: most recent share of that spend...
   signalWindowMin: 1000,        // ...covering at least this many rupees
 
@@ -92,6 +92,8 @@ export function mergeSettings(overrides) {
     if (Number(overrides.heroMinProfitPct) === 0) delete overrides.heroMinProfitPct;
     if (Number(overrides.heroMinSpend) === 5000) delete overrides.heroMinSpend;
   }
+  // Product signal eligibility moved from ₹1,500 to ₹1,000 (Oct 23): a saved old default shouldn't pin it.
+  if (overrides && Number(overrides.catalogMinSpend) === 1500) { overrides = { ...overrides }; delete overrides.catalogMinSpend; }
   for (const [k, v] of Object.entries(overrides || {})) {
     if (!(k in DEFAULT_SETTINGS)) continue;
     const def = DEFAULT_SETTINGS[k];

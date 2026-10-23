@@ -86,7 +86,7 @@ Better: drop the `QUALIFY … = 1` so every product per ad set comes through; th
 
 Product-wise, day-wise spend and GMV across every campaign, catalog included: `seller_id, product_id, spend_date, product_spend, product_gmv, product_spend_gmv`. `product_id` is the Khoj product id. This Spend/GMV is accurate, so the ×0.9 correction (ads question only) is not applied.
 
-1. **Eligibility:** lifetime spend on the product (every day in the question) of at least ₹1,500.
+1. **Eligibility:** lifetime spend on the product (every day in the question) of at least ₹1,000.
 2. **Performance:** Spend/GMV over the most recent half of that spend (at least ₹1,000), so early days don't decide the read. Lifetime Spend/GMV is shown alongside.
 
 Eligible products with recent Spend/GMV ≤ 30% are directional hits and go to the front of the trial queue. Never counted in Success%.
@@ -197,7 +197,7 @@ The order history question is `sql/customer_history_q16717.sql`.
 | Kill review | Each closed trial that didn't graduate: Right if both lifetime and recent were above 36% and it wasn't improving; Recheck if the last half of its spend was within 36% when stopped before ₹7,000; Premature if in the 30–36% band; Wrong if at or under 30%, or it did that well after the stop. |
 | Lifecycle | 14 days above 30% Spend/GMV at the floor budget → lifecycle ended |
 | New trials | 4 live trials per test category; free slots refilled from live untested hero products: catalog hits first, then 300+ order products, then 30–299; about 15% go to control products |
-| Product signal | Products not already in testing. Eligible after ₹1,500 lifetime spend; read on the better of lifetime and recent (last half of spend, min ₹1,000): Spend/GMV ≤ 30% = directional hit (queues the product), otherwise a miss. Never counted in Success%. |
+| Product signal | Products not already in testing. Eligible after ₹1,000 lifetime spend; read on the better of lifetime and recent (last half of spend, min ₹1,000): Spend/GMV ≤ 30% = directional hit (queues the product), otherwise a miss. Never counted in Success%. |
 
 ## Local development
 
