@@ -67,7 +67,8 @@ export function createApi(store) {
       const ev = mem.events || (await getKV('source:events'));
       for (const r of ev?.rows || []) if (String(r.seller_id) === settings.khojSellerId && r.landing_product && idx.byId.has(String(r.landing_product))) wanted.add(String(r.landing_product));
       const clean = (s) => String(s || '').replace(/[|;]/g, ' ');
-      return { khoj_products: [...wanted].map((id) => { const p = idx.byId.get(id); return [id, p.seller, k2s.get(id) || '', p.cat].map(clean).join('|'); }).join(';') };
+      // Each product is listed under its product id and its SKU ids, whichever the events carry.
+      return { khoj_products: [...wanted].flatMap((id) => { const p = idx.byId.get(id); return [id, ...(p.skus || [])].map((key) => [key, p.seller, k2s.get(id) || '', p.cat].map(clean).join('|')); }).join(';') };
     }
     return { parent_sellers: parentSellerList(khojOrderWeights(history.rows || [], settings.khojSellerId, idx)).join(',') };
   }

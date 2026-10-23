@@ -127,24 +127,51 @@ sigs AS (
     SELECT b.customer_id, b.seller_id, b.product_id, b.signal_at, 'browse', n.name FROM browse0 b LEFT JOIN names n USING (product_id)
   )
 ),
+-- The product each session landed on: category from the dashboard's product list ({{khoj_products}}) or, without it,
+-- from the product's name on Khoj orders; parent seller and its product id only come from the list.
+khoj_names AS (
+  SELECT id, ANY_VALUE(name) AS name FROM (
+    SELECT customer_product_short_id AS id, product_name AS name FROM `nushop.orderitems`
+    WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
+    UNION ALL
+    SELECT customer_sku_short_id, product_name FROM `nushop.orderitems`
+    WHERE seller_id = '6aad1869bcb80ce92eb3389b' AND createdat >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 DAY)
+  )
+  WHERE id IS NOT NULL AND id <> ''
+  GROUP BY 1
+),
+landing AS (
+  SELECT s.session_id, s.landing_product, kp.parent_seller, kp.parent_product,
+    COALESCE(kp.cat, CASE
+      WHEN REGEXP_CONTAINS(LOWER(COALESCE(kn.name, '')), r'\bsar(ee|i)s?\b|saaree') THEN 'Saree'
+      WHEN REGEXP_CONTAINS(LOWER(COALESCE(kn.name, '')), r'kurt[aiy]|salwar|anarkali|churidar|dress material|\bsuits?\b|palazzo set|co-?ord') THEN 'Kurti & Suits'
+      WHEN REGEXP_CONTAINS(LOWER(COALESCE(kn.name, '')), r'necklace|earring|jhumk|bangle|bracelet|pendant|mangalsutra|jewel|\brings?\b|\bchains?\b|anklet|payal|nose ?pin|maang|\bkada\b|choker|\bhaar\b|kamarband|toe ring') THEN 'Jewellery'
+      WHEN kn.name IS NULL THEN NULL
+      ELSE 'Other'
+    END, 'Unknown') AS landing_cat
+  FROM sess s
+  LEFT JOIN kp ON kp.product_id = s.landing_product
+  LEFT JOIN khoj_names kn ON kn.id = s.landing_product
+),
 scored AS (
   SELECT
     s.session_id,
-    COALESCE(kp.cat, 'Unknown') AS landing_cat,
+    l.landing_cat,
+    ANY_VALUE(s.landing_product) AS example_landing_product,
     vc.customer_id IS NOT NULL AS linked,
     LOGICAL_OR(g.signal_at IS NOT NULL) AS has_signal,
     LOGICAL_OR(g.kind = 'order') AS order_signal,
     LOGICAL_OR(g.kind = 'browse') AS browse_signal,
-    LOGICAL_OR(g.product_id = kp.parent_product OR g.product_id = s.landing_product) AS m_product,
-    LOGICAL_OR(g.seller_id = kp.parent_seller) AS m_seller,
-    LOGICAL_OR(g.cat = kp.cat AND kp.cat != 'Other') AS m_cat
+    LOGICAL_OR(g.product_id = l.parent_product OR g.product_id = s.landing_product) AS m_product,
+    LOGICAL_OR(g.seller_id = l.parent_seller) AS m_seller,
+    LOGICAL_OR(g.cat = l.landing_cat AND l.landing_cat NOT IN ('Other', 'Unknown')) AS m_cat
   FROM sess s
   LEFT JOIN session_user su ON su.session_id = s.session_id
   LEFT JOIN visitor_customer vc ON vc.user_id = su.user_id
-  LEFT JOIN kp ON kp.product_id = s.landing_product
+  JOIN landing l ON l.session_id = s.session_id
   LEFT JOIN sigs g ON g.customer_id = vc.customer_id
                   AND g.signal_at < s.start_at AND g.signal_at >= TIMESTAMP_SUB(s.start_at, INTERVAL 30 DAY)
-  GROUP BY 1, 2, 3
+  GROUP BY s.session_id, l.landing_cat, linked
 )
 SELECT
   landing_cat,
@@ -162,7 +189,8 @@ SELECT
   COALESCE(browse_signal, FALSE) AS browse_signal,
   COUNT(*) AS sessions,
   COUNTIF(b.session_id IS NOT NULL) AS buy_now_sessions,
-  COUNTIF(o.session_id IS NOT NULL) AS order_sessions
+  COUNTIF(o.session_id IS NOT NULL) AS order_sessions,
+  ANY_VALUE(example_landing_product) AS example_landing_product
 FROM scored
 LEFT JOIN bn b USING (session_id)
 LEFT JOIN ordered o USING (session_id)
