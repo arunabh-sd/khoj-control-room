@@ -1,6 +1,7 @@
 // Platform-neutral API: a function from a web-standard Request to a Response.
 // Used by the Netlify Function (netlify/functions/api.mjs) and by the local Node server (server/index.js).
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,15 @@ import { compute, todayIST, day } from './engine.js';
 import { addDaysIST, mondayOf } from './overview.js';
 import { normalisePlan } from './plan.js';
 import { DEFAULT_SETTINGS, SETTING_LABELS, mergeSettings } from './rules.js';
+
+// Background pulls (Netlify background functions run up to 15 minutes) are triggered by the scheduled functions with
+// a token derived from the Metabase key, so nobody else can start them and no extra variable is needed.
+export const BG_TIMEOUT_MS = Number(process.env.MB_BG_TIMEOUT_MS || 13 * 60_000);
+export const pullToken = () => crypto.createHash('sha256').update(String(process.env.METABASE_API_KEY || '') + ':khoj-pull').digest('hex');
+export const checkPullToken = (tok) => {
+  const a = Buffer.from(String(tok || '')), b = Buffer.from(pullToken());
+  return !!process.env.METABASE_API_KEY && a.length === b.length && crypto.timingSafeEqual(a, b);
+};
 
 // For the Data sources panel: what each column looks like in the first rows (type and a short shape, no values).
 function sampleTypes(rows) {
@@ -131,6 +141,13 @@ export function createApi(store) {
       }
       // A scheduled pull that started but never finished was stopped by Netlify (30 s for scheduled functions).
       const running = await getKV('running:' + name);
+      if (running?.at && running.background) {
+        const age = Date.now() - new Date(running.at).getTime();
+        const ist = new Date(new Date(running.at).getTime() + 330 * 60000).toISOString().slice(11, 16);
+        if (age <= running.timeoutMs + 60_000) return src.status === 'ok' ? src : { ...src, status: 'pulling', pullingSince: running.at, error: `pulling in the background since ${ist} IST` };
+        const msg = `the background pull started ${ist} IST didn't finish within ${Math.round(running.timeoutMs / 60000)} minutes`;
+        return src.status === 'ok' ? { ...src, stale: !src.fallback, error: src.fallback ? src.error : msg } : { ...src, status: 'error', error: msg };
+      }
       if (running?.at && Date.now() - new Date(running.at).getTime() > 60_000 && (!src.loadedAt || new Date(running.at) > new Date(src.failedAt || src.loadedAt))) {
         const msg = `the scheduled pull started ${new Date(new Date(running.at).getTime() + 330 * 60000).toISOString().slice(11, 16)} IST and was stopped by Netlify before it finished (30 s limit for scheduled functions). The question is too big or too slow`;
         if (src.status !== 'ok') { const fb = (await getKV('fallback:' + name)) || bundledFallback(name); if (fb?.rows?.length) return { ...fb, status: 'ok', stale: true, fallback: true, error: msg }; }
@@ -159,7 +176,7 @@ export function createApi(store) {
       return refreshSource(name);
     }
     const cur = await getSource(name);
-    if (cur.status === 'ok') return { ...cur, daily: true };
+    if (cur.status === 'ok' || cur.status === 'pulling') return { ...cur, daily: true };
     const attempt = await getKV('attempt:' + name);
     if (attempt && Date.now() - new Date(attempt.at).getTime() < 3600_000) return { ...cur, daily: true, error: cur.error || 'Waiting for the scheduled pull (checks every 5 minutes)' };
     await setKV('attempt:' + name, { at: new Date().toISOString() });
@@ -176,20 +193,34 @@ export function createApi(store) {
   // Bump when a deploy changes what the scheduled questions need (columns, compaction): the next scheduled run then
   // pulls every scheduled question once, whatever was pulled earlier that day.
   const SCHEDULE_VERSION = DATA_VERSION;
-  async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false, phase = 1 } = {}) {
+  async function runDaily({ timeoutMs = Number(process.env.MB_DAILY_TIMEOUT_MS || 25000), force = false, phase = 1, dispatch = null } = {}) {
     const now = new Date().toISOString();
     if (!force && (await getKV('schedule-version:' + phase)) !== SCHEDULE_VERSION) {
       force = true;
       await setKV('schedule-version:' + phase, SCHEDULE_VERSION);
     }
+    // Bump to give every scheduled question fresh tries after a deploy, without re-pulling the ones already in.
+    const RETRY_VERSION = '2026-10-27.bg';
+    const resetTries = (await getKV('retry-version:' + phase)) !== RETRY_VERSION;
+    if (resetTries) await setKV('retry-version:' + phase, RETRY_VERSION);
     return Promise.all(DAILY_SOURCES.filter((name) => PHASE[name] === phase).map(async (name) => {
       const period = periodOf(name, now);
+      if (resetTries) await setKV('tries:' + name, null);
       const meta = await getKV('meta:' + name);
       if (!force && meta && meta.status === 'ok' && periodOf(name, meta.loadedAt) === period) return { name, skipped: EVERY_HOURS[name] >= 24 ? 'already pulled today' : `already pulled in this ${EVERY_HOURS[name]}-hour window` };
       const tries = await getKV('tries:' + name);
       const n = tries && tries.period === period ? tries.n : 0;
+      const running = await getKV('running:' + name);
+      if (running?.at && running.background && Date.now() - new Date(running.at).getTime() < running.timeoutMs + 60_000) return { name, skipped: 'background pull in progress' };
       if (!force && n >= 3) return { name, skipped: '3 failed tries this period' };
       await setKV('tries:' + name, { period, n: n + 1 });
+      if (dispatch) {
+        // Hand the pull to the background function (15-minute limit) instead of running it inside this 30-second one.
+        await setKV('running:' + name, { at: new Date().toISOString(), timeoutMs: BG_TIMEOUT_MS, background: true });
+        const ok = await dispatch(name).catch(() => false);
+        if (ok) return { name, dispatched: true };
+        await setKV('running:' + name, { at: null });
+      }
       await setKV('running:' + name, { at: new Date().toISOString(), timeoutMs });
       const r = await refreshSource(name, { timeoutMs });
       await setKV('running:' + name, { at: null });
@@ -342,6 +373,15 @@ export function createApi(store) {
       try { return await handle(req); } catch (e) { console.error(e); return json(500, { error: e.message }); }
     },
     refreshSource,
-    runDaily
+    runDaily,
+    // Runs inside the background function: one source, with a long Metabase timeout.
+    async pullInBackground(name) {
+      if (!DAILY_SOURCES.includes(name)) return { name, error: 'not a scheduled source' };
+      await setKV('running:' + name, { at: new Date().toISOString(), timeoutMs: BG_TIMEOUT_MS, background: true });
+      const r = await refreshSource(name, { timeoutMs: BG_TIMEOUT_MS - 30_000 });
+      await setKV('running:' + name, { at: null });
+      if (/quota/i.test(r.error || '')) { const tr = await getKV('tries:' + name); await setKV('tries:' + name, { period: tr?.period || null, n: 99 }); }
+      return { name, status: r.status, rows: r.rawRows ?? r.rows.length, error: r.error || null };
+    }
   };
 }

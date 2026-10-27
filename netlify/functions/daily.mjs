@@ -3,11 +3,12 @@
 // question that is due, with up to 3 tries per window, so the first run after a deploy comes within minutes.
 import { createStore } from '../../server/store.js';
 import { createApi } from '../../server/app.js';
+import { backgroundDispatcher } from '../../server/dispatch.js';
 
 export default async () => {
   const store = createStore();
   await store.init();
-  const result = await createApi(store).runDaily();
+  const result = await createApi(store).runDaily({ dispatch: backgroundDispatcher() });
   console.log(JSON.stringify(result));
   return new Response(JSON.stringify(result), { headers: { 'content-type': 'application/json' } });
 };
