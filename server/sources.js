@@ -34,7 +34,7 @@ const SOURCES = {
   events: { env: 'MB_Q_EVENTS', file: 'events.csv', label: 'Site sessions: Khoj vs parent sellers', everyHours: 24, phase: 2 },
   personalise: { env: 'MB_Q_PERSONALISE', file: 'personalise.csv', label: 'Khoj visitors: personalisation potential', everyHours: 24, phase: 2 },
   prodQuality: { env: 'MB_Q_PRODUCT_QUALITY', id: '17003', file: 'prod_quality.csv', label: 'Order quality: Khoj vs the same products on seller sites', everyHours: 24, phase: 2 },
-  revisit: { env: 'MB_Q_REVISIT', file: 'revisit.csv', label: 'Visits after delivery: Khoj vs parent sellers', everyHours: 24, phase: 2 },
+  revisit: { env: 'MB_Q_REVISIT', id: '17018', file: 'revisit.csv', label: 'Visits after delivery: Khoj vs parent sellers', everyHours: 24, phase: 2 },
   benchmark: { env: 'MB_Q_BENCHMARK', file: 'benchmark.csv', label: 'Repeat benchmark: parent sellers', everyHours: 24, phase: 2 },
   // Phase 3: the heaviest question gets its own scheduled function, so if it runs out of time it can't take the
   // others down with it.
