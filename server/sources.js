@@ -75,9 +75,10 @@ export async function loadOne(name, { timeoutMs, params, paramSets } = {}) {
       const parts = await Promise.all(paramSets.map(async (ps) => (await runCard(id, '', { timeoutMs, params: ps.params })).map((r) => ({ ...r, window: ps.label, window_start: ps.params.start_date, window_end: ps.params.end_date, window_rto: ps.params.rto_pct }))));
       rows = parts.flat();
     } else rows = await runCard(id, src.params ? process.env[src.params] : '', { timeoutMs, params });
+    const warning = rows.warning || null;
     const rawRows = rows.length;
     if (src.compact) rows = src.compact(rows);
-    return { status: 'ok', origin: `Metabase Q${id}`, rows, rawRows, loadedAt };
+    return { status: 'ok', origin: `Metabase Q${id}`, rows, rawRows, loadedAt, ...(warning ? { error: warning } : {}) };
   } catch (e) {
     const id = process.env[src.env] || (src.alt && process.env[src.alt]) || src.id || '';
     return { status: 'error', origin: id ? `Metabase Q${id}` : src.env, error: e.message, rows: [], loadedAt };

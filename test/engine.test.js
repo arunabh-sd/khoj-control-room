@@ -309,23 +309,24 @@ test('daily sources: pulled once a day, never on page load once there is a pull'
     const store = createStore(); await store.init();
     const api = createApi(store);
     const post = (n) => api.handle(new Request('http://x/api/sources/' + n, { method: 'POST' })).then((r) => r.json());
-    assert.equal((await post('universe')).status, 'ok');     // never pulled: the page pulls once
+    assert.equal((await post('universe')).status, 'missing'); // never pulled: the page waits for the background pull
     const again = await post('universe');
     assert.equal(again.daily, true);
-    assert.equal(calls['57'], 1);                             // second page load: no Metabase call
+    assert.equal(calls['57'] || 0, 0);                        // page loads never call Metabase for scheduled sources
     await api.runDaily({ phase: 3 });                                     // first scheduled run after a deploy pulls everything once
-    assert.equal(calls['57'], 2);
+    assert.equal(calls['57'], 1);
+    assert.equal((await post('universe')).status, 'ok');
     assert.equal((await api.runDaily({ phase: 3 })).find((x) => x.name === 'universe').skipped, 'already pulled today');
-    assert.equal(calls['57'], 2);
+    assert.equal(calls['57'], 1);
     await api.runDaily({ force: true, phase: 3 });
-    assert.equal(calls['57'], 3);
+    assert.equal(calls['57'], 2);
     await post('ads'); await post('ads');
     assert.equal(calls['50'], 1);                             // page load within 30 minutes reuses the last pull
     await api.handle(new Request('http://x/api/sources/ads?force=1', { method: 'POST' }));
     assert.equal(calls['50'], 2);                             // the Refresh button always pulls
     const state = await api.handle(new Request('http://x/api/state')).then((r) => r.json());
     assert.equal(state.meta.sources.universe.daily, true);
-    assert.equal(calls['57'], 3);
+    assert.equal(calls['57'], 2);
   } finally {
     srv.close();
     for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;

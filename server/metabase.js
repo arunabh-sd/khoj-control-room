@@ -67,6 +67,14 @@ export async function runCard(cardId, paramStr = '', opts = {}) {
     // Metabase wraps the database error in JSON; surface the database's own message in full.
     let msg = text.slice(0, 200);
     try { const j = JSON.parse(text); msg = j.error || j.message || j.via?.find((v) => v.error)?.error || msg; } catch { /* not JSON */ }
+    // The question doesn't declare a variable the dashboard sends: run it once without that variable, and say so.
+    const tag = String(msg).match(/does not have a template tag named "([^"]+)"/);
+    if (tag && opts.params && tag[1] in opts.params && !opts.retried) {
+      const params = { ...opts.params }; delete params[tag[1]];
+      const rows = await runCard(cardId, paramStr, { ...opts, params, retried: true });
+      rows.warning = `Q${cardId} has no {{${tag[1]}}} variable, so it ran without it. Add a Text variable named ${tag[1]} to the question.`;
+      return rows;
+    }
     throw new Error(`Metabase card ${cardId} returned ${res.status}: ${String(msg).slice(0, 600)}`);
   }
 }

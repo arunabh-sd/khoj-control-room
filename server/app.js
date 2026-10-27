@@ -194,12 +194,9 @@ export function createApi(store) {
       }
       return refreshSource(name);
     }
+    // Scheduled sources are only ever pulled in the background (up to 15 minutes); a page load never tries them inline.
     const cur = await getSource(name);
-    if (cur.status === 'ok' || cur.status === 'pulling') return { ...cur, daily: true };
-    const attempt = await getKV('attempt:' + name);
-    if (attempt && Date.now() - new Date(attempt.at).getTime() < 3600_000) return { ...cur, daily: true, error: cur.error || 'Waiting for the scheduled pull (checks every 5 minutes)' };
-    await setKV('attempt:' + name, { at: new Date().toISOString() });
-    return { ...(await refreshSource(name)), daily: true };
+    return { ...cur, daily: true };
   }
 
   // Scheduled (every 5 minutes): pulls each scheduled source once per period (IST day, or every N hours), with a longer
