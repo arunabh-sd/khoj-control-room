@@ -826,8 +826,7 @@ const shortDate = (iso) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString
 function viewStatus(d) {
   const O = d.overview;
   if (!O) return card('Overall Status', 'Overall Status', '', '<p class="small muted">Waiting for the day-wise question (Q16083). It is pulled every hour in the background.</p>', chip('amber', 'No data yet'));
-  const Wn = O.windows, BE = O.breakevenAdSgmv, PR = O.predictedRto;
-  const sg = (v) => (BE === null || v === null || v === undefined ? '' : v <= BE ? 'good' : v <= BE + 3 ? 'warn' : 'bad');
+  const Wn = O.windows, PR = O.predictedRto;
   // Snapshot: a quiet scorecard. Big number = the selected window; the line under it compares with L7D (or, for L7D,
   // the 7 days before); a grey sparkline shows the last 14 days. Colour only on the comparison text.
   const sel = Wn.find((w) => w.key === ui.win) || Wn[1];
@@ -860,7 +859,7 @@ function viewStatus(d) {
       { label: 'Repeat share of orders', v: nrS ? pc(nrS.repeatPct, 1) : '—', sub: nrS ? cmpLine(nrS.repeatPct, nrR?.repeatPct, { fmt: f1, pts: true }) : nrNote, sp: R14.map((r) => r.repeatPct7) }
     ]],
     ['Efficiency', [
-      { label: 'Spend / GMV', v: pc(sel.sgmv, 1), sub: `${BE !== null ? `<span class="${sel.sgmv <= BE ? 'kgood' : 'kbad'}">breakeven ${pc(BE, 1)}</span> · ` : ''}${cmpLine(sel.sgmv, ref.w.sgmv, { fmt: f1, pts: true, better: 'down' })}`, sp: R14.map((r) => r.sgmv7) },
+      { label: 'Spend / GMV', v: pc(sel.sgmv, 1), sub: cmpLine(sel.sgmv, ref.w.sgmv, { fmt: f1, pts: true, better: 'down' }), sp: R14.map((r) => r.sgmv7) },
       { label: 'CM %', v: sel.cmPct === null ? '—' : `<span class="${sel.cmPct >= 0 ? '' : 'kbadv'}">${pc(sel.cmPct, 1)}</span>`, sub: sel.cmPct === null ? '<span class="muted">P&amp;L pending</span>' : cmpLine(sel.cmPct, ref.w.cmPct, { fmt: f1, pts: true }), sp: [] },
       { label: 'Daily avg spend', v: inr(sel.spendPerDay), sub: cmpLine(sel.spendPerDay, ref.w.spendPerDay, { fmt: inr, better: 'none' }), sp: R14.map((r) => r.spend) },
       { label: 'AOV', v: inr(sel.aov), sub: cmpLine(sel.aov, ref.w.aov, { fmt: inr }), sp: R14.map((r) => r.aov7 ?? r.aov) }
@@ -875,7 +874,7 @@ function viewStatus(d) {
   ];
   const toggle = `<div class="wseg" role="tablist" aria-label="Window">${Wn.map((w) => `<button type="button" data-win="${w.key}" aria-pressed="${w.key === sel.key}">${esc(w.label)}<span>${w.from === w.to ? shortDate(w.from) : `${shortDate(w.from)}–${shortDate(w.to)}`}</span></button>`).join('')}</div>`;
   const body = groups.map(([g, ms]) => `<div class="kgroup"><div class="kgroup-label">${esc(g)}</div><div class="kgrid${ms.length === 5 ? ' kgrid-5' : ''}">${ms.map((m) => `<div class="kcell"><div class="klabel">${esc(m.label)}${m.note ? ` <span class="muted">· ${esc(m.note)}</span>` : ''}</div><div class="kval">${m.v}</div><div class="ksub small">${m.sub}</div>${spark(m.sp)}</div>`).join('')}</div></div>`).join('');
-  const notes = `<p class="small muted" style="margin:0;line-height:1.6">Predicted RTO: on Khoj orders placed ${shortDate(PR?.from)}–${shortDate(PR?.to)}, leaving out cancelled and cancellation-initiated orders (enqueued, invalid and initiated never count), RTO = 1 − delivered ÷ the rest. COD from Khoj's own orders; online ${PR?.online.fromSellers ? `taken as the base sellers' online RTO on the same products (Khoj's own: ${pc(PR.online.actualRtoPct, 1)})` : 'from Khoj\'s own orders until the order-quality question loads'}; weighted by each window's online share. CM %: the P&amp;L at that RTO. Breakeven: yesterday's P&amp;L at the predicted RTO, ex-GST. Repeat: a customer's Khoj order more than ${d.settings.sessionMinutes} minutes after their first${O.newRepeat?.source === 'history' ? ` (from the daily order-history pull, so up to ${shortDate(O.newRepeat.asOf)}; connect the Khoj orders question for today)` : ''}. Sparklines: last 14 days.</p>`;
+  const notes = `<p class="small muted" style="margin:0;line-height:1.6">Predicted RTO: on Khoj orders placed ${shortDate(PR?.from)}–${shortDate(PR?.to)}, leaving out cancelled and cancellation-initiated orders (enqueued, invalid and initiated never count), RTO = 1 − delivered ÷ the rest. COD from Khoj's own orders; online ${PR?.online.fromSellers ? `taken as the base sellers' online RTO on the same products (Khoj's own: ${pc(PR.online.actualRtoPct, 1)})` : 'from Khoj\'s own orders until the order-quality question loads'}; weighted by each window's online share. CM %: the P&amp;L at that RTO. Repeat: a customer's Khoj order more than ${d.settings.sessionMinutes} minutes after their first${O.newRepeat?.source === 'history' ? ` (from the daily order-history pull, so up to ${shortDate(O.newRepeat.asOf)}; connect the Khoj orders question for today)` : ''}. Sparklines: last 14 days.</p>`;
   const top = `<section class="card" aria-label="Snapshot"><div class="card-head"><div><h2>Snapshot</h2></div>${toggle}</div>${body}${notes}</section>`;
 
   const R = O.rolling;
@@ -895,15 +894,14 @@ function viewStatus(d) {
     const lines = [['GMV per shipped order', u.gmv, ''], ['− lost to RTO, returns, discounts', u.nmv - u.gmv, `NMV ${pc(PY.nmvOfGmv, 0)} of GMV`], ['− paid to the seller (TP)', -u.tp, `${pc(PY.tpOfGmv, 0)} of GMV`], ['− logistics', -u.logistics, `${pc(PY.logOfGmv, 0)} of GMV`], ['− marketing (incl. GST)', -u.mkt, `${pc(PY.mktOfGmv, 1)} of GMV`], ['= contribution margin', u.profit, `${pc(PY.profitPct, 1)} of NMV`]];
     const max = u.gmv;
     unit = card('Unit economics', `Unit economics · yesterday (${shortDate(PY.start)})`, `P&L at ${pc(PY.rtoPct, 0)} RTO · ${int(PY.shipped || PY.orders)} shipped orders`,
-      `<div class="grid-2"><div>${lines.map(([l, v, note], i) => `<div style="display:grid;grid-template-columns:200px 1fr 80px;gap:10px;align-items:center;margin:6px 0"><span class="small">${esc(l)}</span><span class="bar" style="min-width:0"><span style="width:${Math.min(100, Math.abs(v) / max * 100)}%;background:${i === 0 ? 'var(--blue)' : i === lines.length - 1 ? (v >= 0 ? 'var(--green)' : 'var(--orange)') : 'var(--muted)'}"></span></span><span class="num r small ${i === lines.length - 1 ? (v >= 0 ? 'good' : 'bad') : ''}">${inr(v)}</span></div><div class="muted small" style="margin:-4px 0 4px 210px">${esc(note)}</div>`).join('')}</div>
-      <div>${kpiRow([['Breakeven Spend/GMV', pc(BE, 1), 'ad spend, ex-GST'], ['Actual yesterday', pc(Wn.find((w) => w.key === 'yesterday')?.sgmv, 1), 'day-wise, ex-GST']])}
-      <p class="small muted" style="margin-top:10px">Breakeven = (NMV − seller payout − logistics) ÷ GMV = ${pc(PY.breakevenMktOfGmv, 1)} of GMV available for marketing including GST; ÷ 1.18 to compare with ad spend, which the day-wise question tracks without GST.</p></div></div>`);
+      `<div style="max-width:760px">${lines.map(([l, v, note], i) => `<div style="display:grid;grid-template-columns:200px 1fr 80px;gap:10px;align-items:center;margin:6px 0"><span class="small">${esc(l)}</span><span class="bar" style="min-width:0"><span style="width:${Math.min(100, Math.abs(v) / max * 100)}%;background:${i === 0 ? 'var(--blue)' : i === lines.length - 1 ? (v >= 0 ? 'var(--green)' : 'var(--orange)') : 'var(--muted)'}"></span></span><span class="num r small ${i === lines.length - 1 ? (v >= 0 ? 'good' : 'bad') : ''}">${inr(v)}</span></div><div class="muted small" style="margin:-4px 0 4px 210px">${esc(note)}</div>`).join('')}</div>
+</div>`);
   } else unit = card('Unit economics', 'Unit economics · yesterday', '', '<p class="small muted">Waiting for yesterday\'s P&amp;L (Q16167), pulled every 2 hours.</p>');
 
   const weeks = card('Week over week', 'Week over week', 'Mon–Sun · the current week runs to yesterday · RTO and CM from the P&L at the predicted RTO', tbl([
     { h: 'Week', v: (w) => `<strong>${esc(w.label)}</strong> <span class="muted small">${shortDate(w.week)}${w.partial ? ` · ${w.days}d` : ''}</span>` },
     { h: 'Orders/day', r: 1, v: (w) => int(w.ordersPerDay) }, { h: 'GMV/day', r: 1, v: (w) => inr(w.gmvPerDay) }, { h: 'Spend/day', r: 1, v: (w) => inr(w.spendPerDay) },
-    { h: 'Spend/GMV', r: 1, v: (w) => pc(w.sgmv, 1), cls: (w) => sg(w.sgmv) },
+    { h: 'Spend/GMV', r: 1, v: (w) => pc(w.sgmv, 1) },
     { h: 'AOV', r: 1, v: (w) => inr(w.aov) }, { h: 'Online', r: 1, v: (w) => pc(w.onlinePct, 1) }, { h: 'Cancelled', r: 1, v: (w) => pc(w.cancelPct, 1) }, { h: 'Repeat share', r: 1, v: (w) => (w.nr ? pc(w.nr.repeatPct, 1) : '—') },
     { h: 'CTR', r: 1, v: (w) => pc(w.ctr, 2) }, { h: 'CPM', r: 1, v: (w) => inr(w.cpm) }, { h: 'Click→order', r: 1, v: (w) => pc(w.c2pr, 2) },
     { h: 'RTO', r: 1, v: (w) => (w.pnl ? pc(w.pnl.rtoPct, 1) : '—') }, { h: 'CM %', r: 1, v: (w) => (w.pnl ? pc(w.pnl.profitPct, 1) : '—'), cls: (w) => (w.pnl ? (w.pnl.profitPct >= 0 ? 'good' : 'bad') : '') }
