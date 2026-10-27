@@ -4,10 +4,10 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 
 **Tabs**
 
-- **Product Testing**: headline numbers, hero pipeline and Success% (by category and by product source), live trials with the engine's decision and reason, the scale ladder, the catalog signal, the decision log and data-source health.
-- **Hero coverage**: uploaded vs live vs hero products per test category, and the relisting backlog.
-- **Task log**: New trials to start, Kills, Scales. Tick when done; tasks also close themselves once the data shows the change (ad set paused, budget moved, trial started).
-- **Rules**: every threshold the engine uses, editable and saved to Postgres.
+- **Overall Status**: executive summary for founders. Last 7 days vs the 7 before (orders, GMV, spend, Spend/GMV, AOV, online %, cancellations, RTO, profit), flags, daily trends, week-by-week table, unit economics per shipped order with the breakeven Spend/GMV, why Spend/GMV moved (CPM, CTR, click→order, AOV), a PMF snapshot and operations. From the day-wise question (Q16083) and the P&L question (Q16167, pulled per date window).
+- **Scaling Plan & Status**: a week-wise plan (daily spend by bucket: Meta catalog, Meta winners, product testing, other Meta, Google; Spend/GMV per bucket and overall; GMV, AOV, orders; trials tested, in testing, winners, killed, success %) against actuals, which assumptions are holding, and the risks to the plan. The plan is edited on the page and saved.
+- **PMF View**, with sub-tabs: Overall summary · Hit % & Scalability (product testing, hero coverage at the bottom) · Customer Quality · Early signs on repeats & likability (to come) · Actual Repeats · Cross Selling · Using ShopDeck's data advantage (personalisation potential for buyers and visitors).
+- **Rules** and **Task log**.
 
 ## Deploy on Netlify
 
@@ -18,6 +18,8 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 |---|---|
 | `METABASE_URL` | `https://metabase.kaip.in` |
 | `METABASE_API_KEY` | your Metabase API key |
+| `MB_Q_DAYWISE` | `16083` (Khoj day-wise: orders, GMV, spend, ad funnel) |
+| `MB_Q_PNL` | `16167` (Khoj P&L; the dashboard passes `start_date`, `end_date`, `rto_pct` per window) |
 | `MB_Q_PRODUCTS` | `16450` |
 | `MB_Q_ADS` | `16659` |
 | `MB_Q_ADSET_MAP` | `16676` (ad set → product) |

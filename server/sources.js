@@ -8,6 +8,10 @@ import { compactUniverse } from './universe.js';
 import { compactHistory, compactBrowsing } from './history.js';
 
 const SOURCES = {
+  // Overall Status: Khoj day-wise orders, GMV, spend and ad funnel (Q16083), on page load.
+  daywise: { env: 'MB_Q_DAYWISE', file: 'daywise.csv', label: 'Khoj day-wise (orders, GMV, spend)' },
+  // P&L (Q16167) for several date windows (weeks since launch, last 7 days, yesterday, since launch), once a day.
+  pnl: { env: 'MB_Q_PNL', file: 'pnl.csv', label: 'Khoj P&L by window', everyHours: 24 },
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products', everyHours: 6 },
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
   catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
@@ -33,7 +37,7 @@ export const DAILY_SOURCES = SOURCE_NAMES.filter((k) => SOURCES[k].everyHours);
 export const EVERY_HOURS = Object.fromEntries(DAILY_SOURCES.map((k) => [k, SOURCES[k].everyHours]));
 export const PHASE = Object.fromEntries(DAILY_SOURCES.map((k) => [k, SOURCES[k].phase || 1]));
 
-export async function loadOne(name, { timeoutMs, params } = {}) {
+export async function loadOne(name, { timeoutMs, params, paramSets } = {}) {
   const src = SOURCES[name];
   if (!src) throw new Error(`Unknown source ${name}`);
   const loadedAt = new Date().toISOString();
@@ -53,7 +57,12 @@ export async function loadOne(name, { timeoutMs, params } = {}) {
     }
     const id = process.env[src.env] || (src.alt && process.env[src.alt]);
     if (!id) return { status: 'missing', origin: `${src.env} not set`, rows: [], loadedAt };
-    let rows = await runCard(id, src.params ? process.env[src.params] : '', { timeoutMs, params });
+    let rows;
+    if (paramSets?.length) {
+      // One question, several parameter sets (e.g. P&L per date window): run them together, tag each row.
+      const parts = await Promise.all(paramSets.map(async (ps) => (await runCard(id, '', { timeoutMs, params: ps.params })).map((r) => ({ ...r, window: ps.label, window_start: ps.params.start_date, window_end: ps.params.end_date }))));
+      rows = parts.flat();
+    } else rows = await runCard(id, src.params ? process.env[src.params] : '', { timeoutMs, params });
     const rawRows = rows.length;
     if (src.compact) rows = src.compact(rows);
     return { status: 'ok', origin: `Metabase Q${id}`, rows, rawRows, loadedAt };

@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES, EVERY_HOURS, PHASE } from './sources.js';
 import { khojOrderWeights, parentSellerList } from './benchmarks.js';
 import { buildProductIndex } from './engine.js';
-import { compute, todayIST } from './engine.js';
+import { compute, todayIST, day } from './engine.js';
+import { addDaysIST, mondayOf } from './overview.js';
+import { normalisePlan } from './plan.js';
 import { DEFAULT_SETTINGS, SETTING_LABELS, mergeSettings } from './rules.js';
 
 // For the Data sources panel: what each column looks like in the first rows (type and a short shape, no values).
@@ -41,7 +43,7 @@ function bundledFallback(name) {
 
 // Bump on a deploy that should refresh every source once: scheduled questions are pulled again on the next check, and
 // the first page load pulls the page-load questions instead of reusing an older pull.
-const DATA_VERSION = '2026-10-23.1';
+const DATA_VERSION = '2026-10-27.1';
 
 export function createApi(store) {
   const mem = {};   // warm-instance copy of the last Metabase pull per source
@@ -77,7 +79,27 @@ export function createApi(store) {
     return { parent_sellers: parentSellerList(khojOrderWeights(history.rows || [], settings.khojSellerId, idx)).join(',') };
   }
 
+  // P&L windows: each week (Mon–Sun) since launch, the last 7 days, yesterday, and since launch, all up to yesterday.
+  async function pnlParamSets() {
+    const settings = mergeSettings(await store.getSettings());
+    const dw = await getSource('daywise');
+    const dates = (dw.rows || []).map((r) => day(r.date)).filter(Boolean).sort();
+    const yest = addDaysIST(todayIST(), -1);
+    const launch = dates[0] || addDaysIST(yest, -27);
+    const rto = settings.pnlRtoPct;
+    const sets = [];
+    const mk = (label, start, end) => { if (start <= end) sets.push({ label, params: { start_date: start, end_date: end, rto_pct: rto } }); };
+    let wk = mondayOf(launch);
+    while (wk <= yest) { const end = addDaysIST(wk, 6); mk(`week:${wk}`, wk < launch ? launch : wk, end > yest ? yest : end); wk = addDaysIST(wk, 7); }
+    mk('last7', addDaysIST(yest, -6), yest);
+    mk('prev7', addDaysIST(yest, -13), addDaysIST(yest, -7));
+    mk('yesterday', yest, yest);
+    mk('all', launch, yest);
+    return sets;
+  }
+
   async function refreshSource(name, opts = {}) {
+    if (name === 'pnl' && !opts.paramSets && !process.env.DATA_DIR) opts = { ...opts, paramSets: await pnlParamSets() };
     if (PHASE[name] === 2 && !opts.params) opts = { ...opts, params: await phase2Params(name) };
     const result = { ...(await loadOne(name, opts)), version: DATA_VERSION };
     if (result.status === 'error') {
@@ -180,6 +202,7 @@ export function createApi(store) {
   async function buildState() {
     const sources = {};
     for (const name of SOURCE_NAMES) sources[name] = await getSource(name);
+    sources.plan = store.getKV ? await store.getKV('plan') : null;
     sources.loadedAt = SOURCE_NAMES.filter((n) => !isDaily(n)).map((n) => sources[n].loadedAt).filter(Boolean).sort()[0] || new Date().toISOString();
     const settings = mergeSettings(await store.getSettings());
     const history = await store.listDecisions();
@@ -288,6 +311,16 @@ export function createApi(store) {
       const body = await readJson(req);
       const ok = await store.setTaskDone(decodeURIComponent(taskMatch[1]), !!body.done);
       return ok ? json(200, { ok: true }) : json(404, { error: 'Task not found' });
+    }
+    if (p === '/api/plan' && req.method === 'PUT') {
+      const body = await readJson(req, 200_000);
+      const plan = normalisePlan({ ...body, saved: true });
+      if (store.setKV) await store.setKV('plan', plan);
+      return json(200, { ok: true, plan });
+    }
+    if (p === '/api/plan' && req.method === 'DELETE') {
+      if (store.setKV) await store.setKV('plan', null);
+      return json(200, { ok: true });
     }
     if (p === '/api/settings' && req.method === 'PUT') {
       const incoming = await readJson(req);

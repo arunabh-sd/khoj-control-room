@@ -1,12 +1,15 @@
 // Khoj Control Room front end. No build step: plain ES modules, rendered from /api/state.
 const CATS = ['Saree', 'Kurti & Suits', 'Jewellery'];
-const ui = { tab: 'room', cat: 'All', live: 'all', sig: 'ppo', showDone: true, data: null, busy: false, saving: false, uploading: false, msg: '', note: '' };
+const ui = { tab: 'status', sub: 'summary', cat: 'All', live: 'all', sig: 'ppo', showDone: true, data: null, busy: false, saving: false, uploading: false, msg: '', note: '' };
 try { Object.assign(ui, JSON.parse(localStorage.getItem('khoj-ui') || '{}'), { data: null, busy: false, saving: false, uploading: false, msg: '', note: '' }); } catch {}
-const remember = () => { try { localStorage.setItem('khoj-ui', JSON.stringify({ tab: ui.tab, cat: ui.cat, live: ui.live, sig: ui.sig, showDone: ui.showDone })); } catch {} };
+// Older saved tabs → their new home.
+{ const OLD = { room: ['pmf', 'hits'], cover: ['pmf', 'hits'], audience: ['pmf', 'quality'], cross: ['pmf', 'cross'], repeat: ['pmf', 'repeat'] };
+  if (OLD[ui.tab]) [ui.tab, ui.sub] = OLD[ui.tab]; }
+const remember = () => { try { localStorage.setItem('khoj-ui', JSON.stringify({ tab: ui.tab, sub: ui.sub, cat: ui.cat, live: ui.live, sig: ui.sig, showDone: ui.showDone })); } catch {} };
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const inr = (n) => (n === null || n === undefined ? '—' : '₹' + Math.round(n).toLocaleString('en-IN'));
+const inr = (n) => (n === null || n === undefined || !Number.isFinite(n) ? '—' : (n < -0.5 ? '−₹' : '₹') + Math.abs(Math.round(n)).toLocaleString('en-IN'));
 const int = (n) => (n === null || n === undefined ? '—' : Math.round(n).toLocaleString('en-IN'));
 const pc = (n, d = 0) => (n === null || n === undefined || !Number.isFinite(n) ? '—' : n.toFixed(d) + '%');
 const chip = (cls, text) => `<span class="chip chip-${cls}">${esc(text)}</span>`;
@@ -122,7 +125,8 @@ function renderChrome() {
   const d = ui.data;
   $('cats').innerHTML = ['All', ...CATS].map((c) => `<button type="button" class="pill" data-cat="${esc(c)}" aria-pressed="${c === ui.cat}">${c === 'All' ? 'All test categories' : esc(c)}</button>`).join('');
   const open = d ? d.tasks.filter((t) => !t.done && inCat(t.category)).length : 0;
-  const tabs = [['room', 'Product Testing', ''], ['cover', 'Hero coverage', ''], ['audience', 'Audience intelligence', ''], ['cross', 'Cross-selling', ''], ['repeat', 'Repeat behaviour', ''], ['rules', 'Rules', ''], ['tasks', 'Task log', open ? `${open} open` : '']];
+  const tabs = [['status', 'Overall Status', ''], ['plan', 'Scaling Plan & Status', ''], ['pmf', 'PMF View', ''], ['rules', 'Rules', ''], ['tasks', 'Task log', open ? `${open} open` : '']];
+  $('cats').style.display = (ui.tab === 'pmf' && ui.sub === 'hits') || ui.tab === 'tasks' ? '' : 'none';
   $('tabs').innerHTML = tabs.map(([k, l, b]) => `<button type="button" class="tab" role="tab" data-tab="${k}" aria-selected="${k === ui.tab}">${l}${b ? ' ' + chip('orange', b) : ''}</button>`).join('');
   $('refresh').disabled = ui.busy;
   if (!ui.busy) $('refresh').textContent = 'Refresh from Metabase';
@@ -152,7 +156,7 @@ function render() {
     if (!ui.busy) $('view').innerHTML = `<div class="card"><p>Nothing loaded yet.</p><p><button type="button" class="btn btn-primary" id="retry">Try again</button></p></div>`;
     return;
   }
-  const view = { room: viewRoom, cover: viewCover, tasks: viewTasks, audience: viewAudience, cross: viewCross, repeat: viewRepeat, rules: viewRules }[ui.tab] || viewRoom;
+  const view = { status: viewStatus, plan: viewPlan, pmf: viewPmf, tasks: viewTasks, rules: viewRules }[ui.tab] || viewStatus;
   $('view').innerHTML = `<div class="view">${view(d)}</div>`;
 }
 
@@ -333,7 +337,7 @@ function logCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', events: 'Site sessions vs parent sellers', personalise: 'Visitor personalisation', benchmark: 'Repeat benchmark (parent sellers)' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', daywise: 'Khoj day-wise', pnl: 'Khoj P&L', events: 'Site sessions vs parent sellers', personalise: 'Visitor personalisation', benchmark: 'Repeat benchmark (parent sellers)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.fallback ? chip('amber', `Repo copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.rows ? `<a class="small" href="/api/sources/${esc(k)}.csv" download>Download the rows (CSV)</a>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
@@ -484,14 +488,14 @@ function historySub(d) {
   return `${int(d.customers.audience.buyers)} Khoj buyers · Khoj orders since ${dateOfMin(d.customers.audience.sinceFirst)} · ShopDeck history ${dateOfMin(c.from)} to ${dateOfMin(c.to)} · cancelled orders left out · RTO is of delivered + returned orders`;
 }
 
-function viewAudience(d) {
+function viewAudience(d, mode = 'quality') {
   const cu = d.customers;
   const overlapMissing = `<section class="card"><div class="card-head"><h2>Cannibalisation · Khoj × parent seller</h2>${chip('amber', 'Not connected')}</div><p class="small muted">Set <code>MB_Q_OVERLAP</code> to the overlap question (Q16494).</p></section>`;
   const later = planned('Still to come', 'Next steps on top of this data', [
     ['Next-best product per customer', ['Top hero products per customer from their orders, browsing, category affinity and price band', 'Export as Meta custom audiences']],
     ['Browsed but didn\'t buy on Khoj', ['Khoj visitors who never ordered: what they looked at, matched to their ShopDeck history']]
   ], [['Khoj buyers\' browsing (MB_Q_BROWSING)', 'sql/khoj_buyer_browsing.sql']]);
-  if (!cu || cu.error || !cu.audience) return historyMissing('Audience intelligence') + (d.overlap ? overlapCard(d) : overlapMissing) + later;
+  if (!cu || cu.error || !cu.audience) return mode === 'data' ? historyMissing('Personalisation potential') + visitorPersonalisationCard(d) : historyMissing('Customer quality') + (d.overlap ? overlapCard(d) : overlapMissing) + later;
   const a = cu.audience, pr = a.predict, pa = a.parent, cmp = a.compare;
   const recent7 = a.byRecency.find((x) => x.key === 'Within 7 days');
   const who = card('Who buys on Khoj', 'Who buys on Khoj', historySub(d), kpiRow([
@@ -552,7 +556,8 @@ function viewAudience(d) {
     { h: 'Bought from them before', r: 1, v: (r) => pc(r.beforePct, 1), cls: (r) => (r.beforePct > 25 ? 'bad' : '') }, { h: 'Same product before', r: 1, v: (r) => pc(r.beforeProductPct, 1) },
     { h: 'Bought from them after', r: 1, v: (r) => pc(r.afterPct, 1) }, { h: 'Any seller after', r: 1, v: (r) => pc(r.afterAnyPct, 1) }
   ], a.parentBySeller, { min: 760 }));
-  return who + predict + visitorPersonalisationCard(d) + cross + journeys + customersCard(d) + compare + parent + (d.overlap ? overlapCard(d) : overlapMissing) + later;
+  if (mode === 'data') return predict + visitorPersonalisationCard(d);
+  return qualityTopCard(d) + who + compare + cross + journeys + customersCard(d) + parent + (d.overlap ? overlapCard(d) : overlapMissing) + later;
 }
 
 function visitorPersonalisationCard(d) {
@@ -778,6 +783,259 @@ function viewCross(d) {
   return explore + beyond + matchedRcaCard(S) + rcaCard(S);
 }
 
+// ---------- Charts (inline SVG, no library) ----------
+function chartSvg({ labels, bars = null, lines = [], refLine = null, height = 180, yFmt = (v) => v, barColor = 'var(--blue)', barLabel = '', yCap = null }) {
+  const W = 760, H = height, pl = 44, pr = 12, pt = 12, pb = 26;
+  const n = labels.length; if (!n) return '';
+  const vals = [...(bars || []), ...lines.flatMap((l) => l.values), ...(refLine ? [refLine.value] : [])].filter((v) => v !== null && Number.isFinite(v));
+  const max = Math.min(Math.max(...vals, 0), yCap ?? Infinity) * 1.12 || 1;
+  const clip = (v) => (v === null ? null : Math.min(v, max));
+  const x = (i) => pl + ((W - pl - pr) * (i + 0.5)) / n, y = (v) => pt + (H - pt - pb) * (1 - Math.min(v, max) / max);
+  const bw = Math.max(2, ((W - pl - pr) / n) * 0.62);
+  const ticks = [0, 0.5, 1].map((f) => max * f / 1.12);
+  const grid = ticks.map((v) => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${pl - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${esc(yFmt(v))}</text>`).join('');
+  const barsSvg = bars ? bars.map((v, i) => v === null ? '' : `<rect x="${x(i) - bw / 2}" y="${y(v)}" width="${bw}" height="${Math.max(0, H - pb - y(v))}" rx="2" fill="${barColor}" opacity=".28"><title>${esc(labels[i])}: ${esc(yFmt(v))} ${esc(barLabel)}</title></rect>`).join('') : '';
+  const linesSvg = lines.map((l) => {
+    const pts = l.values.map((v, i) => (v === null || !Number.isFinite(v) ? null : `${x(i)},${y(v)}`)).filter(Boolean);
+    return `<polyline points="${pts.join(' ')}" fill="none" stroke="${l.color}" stroke-width="${l.width || 2}" ${l.dash ? 'stroke-dasharray="4 3"' : ''} stroke-linejoin="round"/>` + (l.dots ? l.values.map((v, i) => (v === null ? '' : `<circle cx="${x(i)}" cy="${y(v)}" r="2.5" fill="${l.color}" opacity=".55"><title>${esc(labels[i])}: ${esc(yFmt(v))}</title></circle>`)).join('') : '');
+  }).join('');
+  const ref = refLine ? `<line x1="${pl}" x2="${W - pr}" y1="${y(refLine.value)}" y2="${y(refLine.value)}" stroke="${refLine.color}" stroke-width="1.5" stroke-dasharray="5 4"/><text x="${W - pr}" y="${y(refLine.value) - 5}" text-anchor="end" font-size="10" fill="${refLine.color}">${esc(refLine.label)}</text>` : '';
+  const step = Math.ceil(n / 8);
+  const xl = labels.map((l, i) => (i % step === 0 || i === n - 1 ? `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--muted)">${esc(l)}</text>` : '')).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" style="display:block;max-width:100%">${grid}${barsSvg}${ref}${linesSvg}${xl}</svg>`;
+}
+const legend = (items) => `<div class="small muted" style="display:flex;gap:14px;flex-wrap:wrap">${items.map(([c, l, dash]) => `<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:16px;height:0;border-top:2px ${dash ? 'dashed' : 'solid'} ${c}"></span>${esc(l)}</span>`).join('')}</div>`;
+const delta = (a, b, { pts = false, inverse = false, d = 0 } = {}) => {
+  if (a === null || a === undefined || b === null || b === undefined || !Number.isFinite(a) || !Number.isFinite(b)) return '';
+  const v = pts ? a - b : b ? ((a - b) / b) * 100 : null; if (v === null) return '';
+  const good = inverse ? v < 0 : v > 0;
+  return `<span class="${Math.abs(v) < 0.05 ? 'muted' : good ? 'good' : 'bad'}">${v >= 0 ? '+' : ''}${v.toFixed(pts ? 1 : d)}${pts ? ' pts' : '%'}</span>`;
+};
+const shortDate = (iso) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '');
+
+// ---------- Overall Status ----------
+function viewStatus(d) {
+  const O = d.overview;
+  if (!O) return card('Overall Status', 'Overall Status', '', '<p class="small muted">Connect the day-wise question: set <code>MB_Q_DAYWISE</code> = 16083 (and <code>MB_Q_PNL</code> = 16167 for the P&amp;L) on Netlify.</p>', chip('amber', 'Not connected'));
+  const L = O.last7, P = O.prev7, PL = O.pnl.last7, PP = O.pnl.prev7;
+  const toneCls = { bad: 'notice-orange', good: 'notice-green', info: 'notice-amber' };
+  const pnlLabel = PL ? (PL.window === 'last7' ? 'last 7 days' : `${shortDate(PL.start)}${PL.end !== PL.start ? '–' + shortDate(PL.end) : ''}`) : '';
+  const head = card('Where we are', 'Where we are', `Last 7 days (${shortDate(L.from)}–${shortDate(L.to)}) vs the 7 before · today so far: ${O.todayRow ? `${int(O.todayRow.orders)} orders, ${inr(O.todayRow.gmv)} GMV` : '—'}`,
+    `<p style="margin:0;font-size:15px;line-height:1.55">${esc(O.verdict)}</p>` + kpiRow([
+      ['Orders / day', int(L.ordersPerDay), ''], ['GMV / day', inr(L.gmvPerDay), ''], ['Spend / day', inr(L.spendPerDay), ''],
+      ['Spend / GMV', pc(L.sgmv, 1), O.breakevenAdSgmv ? `breakeven ~${pc(O.breakevenAdSgmv, 1)}` : ''], ['AOV', inr(L.aov), ''],
+      ['Online orders', pc(L.onlinePct, 1), ''], ['Cancelled', pc(L.cancelPct, 1), ''],
+      ['RTO', PL ? pc(PL.rtoPct, 1) : '—', PL ? `P&L, ${pnlLabel}` : 'connect MB_Q_PNL'], ['Profit (of NMV)', PL ? pc(PL.profitPct, 1) : '—', PL ? `${inr(PL.perOrder?.profit)} per shipped order` : '']
+    ]) +
+    `<div class="small" style="display:flex;gap:16px;flex-wrap:wrap">Week on week: orders/day ${delta(L.ordersPerDay, P.ordersPerDay)} · GMV/day ${delta(L.gmvPerDay, P.gmvPerDay)} · spend/day ${delta(L.spendPerDay, P.spendPerDay)} · Spend/GMV ${delta(L.sgmv, P.sgmv, { pts: true, inverse: true })} · AOV ${delta(L.aov, P.aov)} · online ${delta(L.onlinePct, P.onlinePct, { pts: true })} · cancelled ${delta(L.cancelPct, P.cancelPct, { pts: true, inverse: true })}${PL && PP ? ` · RTO ${delta(PL.rtoPct, PP.rtoPct, { pts: true, inverse: true })} · profit ${delta(PL.profitPct, PP.profitPct, { pts: true })}` : ''}</div>` +
+    (O.flags.length ? `<div style="display:flex;flex-direction:column;gap:8px">${O.flags.map((f) => `<div class="notice ${toneCls[f.tone]}">${esc(f.text)}</div>`).join('')}</div>` : ''));
+
+  const R = O.rolling;
+  const lab = R.map((r) => shortDate(r.date));
+  const trend = card('Trend', 'How we are trending', 'Daily, since launch · lines are 7-day averages',
+    `<div class="grid-2"><div><div class="group-title">Orders per day</div>${chartSvg({ labels: lab, bars: R.map((r) => r.orders), lines: [{ values: R.map((r) => r.orders7), color: 'var(--blue)' }], yFmt: (v) => Math.round(v), barLabel: 'orders' })}${legend([['var(--blue)', '7-day average orders']])}</div>
+     <div><div class="group-title">Spend / GMV</div>${chartSvg({ labels: lab, lines: [{ values: R.map((r) => r.sgmv), color: 'var(--orange)', width: 1, dots: true }, { values: R.map((r) => r.sgmv7), color: 'var(--orange)' }], refLine: O.breakevenAdSgmv ? { value: O.breakevenAdSgmv, label: `breakeven ~${O.breakevenAdSgmv.toFixed(0)}%`, color: 'var(--green)' } : null, yFmt: (v) => `${Math.round(v)}%`, yCap: 80 })}${legend([['var(--orange)', '7-day Spend/GMV'], ['var(--green)', 'breakeven (P&L)', true]])}</div>
+     <div><div class="group-title">Spend and GMV per day (₹)</div>${chartSvg({ labels: lab, bars: R.map((r) => r.gmv), lines: [{ values: R.map((r) => r.spend), color: 'var(--purple)' }], yFmt: (v) => `${Math.round(v / 1000)}k`, barColor: 'var(--green)', barLabel: 'GMV' })}${legend([['var(--green)', 'GMV (bars)'], ['var(--purple)', 'spend']])}</div>
+     <div><div class="group-title">Online share and AOV (7-day)</div>${chartSvg({ labels: lab, lines: [{ values: R.map((r) => r.online7), color: 'var(--blue)' }], yFmt: (v) => `${Math.round(v)}%` })}${legend([['var(--blue)', 'online orders %']])}</div></div>`);
+
+  const weeks = card('Week by week', 'Week by week', 'Mon–Sun · the current week runs to yesterday · RTO and profit from the P&L question at its predicted RTO for orders in transit', tbl([
+    { h: 'Week', v: (w) => `<strong>${esc(w.label)}</strong> <span class="muted small">${shortDate(w.week)}${w.partial ? ` · ${w.days}d` : ''}</span>` },
+    { h: 'Orders/day', r: 1, v: (w) => int(w.ordersPerDay) }, { h: 'GMV/day', r: 1, v: (w) => inr(w.gmvPerDay) }, { h: 'Spend/day', r: 1, v: (w) => inr(w.spendPerDay) },
+    { h: 'Spend/GMV', r: 1, v: (w) => pc(w.sgmv, 1), cls: (w) => (O.breakevenAdSgmv && w.sgmv !== null ? (w.sgmv <= O.breakevenAdSgmv ? 'good' : w.sgmv <= O.breakevenAdSgmv * 1.25 ? 'warn' : 'bad') : '') },
+    { h: 'AOV', r: 1, v: (w) => inr(w.aov) }, { h: 'Online', r: 1, v: (w) => pc(w.onlinePct, 1) }, { h: 'Cancelled', r: 1, v: (w) => pc(w.cancelPct, 1) },
+    { h: 'CTR', r: 1, v: (w) => pc(w.ctr, 2) }, { h: 'CPM', r: 1, v: (w) => inr(w.cpm) }, { h: 'Click→order', r: 1, v: (w) => pc(w.c2pr, 2) },
+    { h: 'RTO', r: 1, v: (w) => (w.pnl ? pc(w.pnl.rtoPct, 1) : '—') }, { h: 'Profit % (NMV)', r: 1, v: (w) => (w.pnl ? pc(w.pnl.profitPct, 1) : '—'), cls: (w) => (w.pnl ? (w.pnl.profitPct >= 0 ? 'good' : 'bad') : '') }
+  ], O.weeks, { min: 1100 }));
+
+  let unit = '';
+  if (PL && PL.perOrder) {
+    const u = PL.perOrder;
+    const lines = [['GMV per shipped order', u.gmv, ''], ['− lost to RTO, returns, discounts', u.nmv - u.gmv, `NMV ${pc(PL.nmvOfGmv, 0)} of GMV`], ['− paid to the seller (TP)', -u.tp, `${pc(PL.tpOfGmv, 0)} of GMV`], ['− logistics', -u.logistics, `${pc(PL.logOfGmv, 0)} of GMV`], ['− marketing', -u.mkt, `${pc(PL.mktOfGmv, 1)} of GMV`], ['= profit', u.profit, `${pc(PL.profitPct, 1)} of NMV`]];
+    const max = u.gmv;
+    const perPt = (PL.gmv / (PL.shipped || 1)) / 100;   // ₹ per order for each point of marketing/GMV
+    unit = card('Unit economics', `Unit economics per shipped order · ${pnlLabel}`, `From the P&L at ${pc(PL.rtoPct, 0)} RTO (${int(PL.delivered)} delivered, ${int(PL.rto)} RTO, predicted for orders in transit)`,
+      `<div class="grid-2"><div>${lines.map(([l, v, note], i) => `<div style="display:grid;grid-template-columns:200px 1fr 80px;gap:10px;align-items:center;margin:6px 0"><span class="small">${esc(l)}</span><span class="bar" style="min-width:0"><span style="width:${Math.min(100, Math.abs(v) / max * 100)}%;background:${i === 0 ? 'var(--blue)' : i === lines.length - 1 ? (v >= 0 ? 'var(--green)' : 'var(--orange)') : 'var(--muted)'}"></span></span><span class="num r small ${i === lines.length - 1 ? (v >= 0 ? 'good' : 'bad') : ''}">${inr(v)}</span></div><div class="muted small" style="margin:-4px 0 4px 210px">${esc(note)}</div>`).join('')}</div>
+      <div>${kpiRow([
+        ['Breakeven marketing', pc(PL.breakevenMktOfGmv, 1), 'of GMV, at this RTO and seller payout'],
+        ['Breakeven in ad Spend/GMV', pc(O.breakevenAdSgmv, 1), O.mktToSpend ? `P&L marketing is ${O.mktToSpend.toFixed(2)}× ad spend (tax, other costs)` : ''],
+        ['Each point of Spend/GMV', inr(perPt * (O.mktToSpend || 1)), 'per shipped order']
+      ])}<p class="small muted">To break even at today's RTO, ad Spend/GMV has to come down to about ${pc(O.breakevenAdSgmv, 1)}, or RTO and seller payout have to improve. Every point of RTO costs roughly ${inr((PL.nmv / Math.max(1, PL.shipped)) / Math.max(1, 100 - (PL.rtoPct || 0)))} of NMV per shipped order.</p></div></div>`);
+  }
+
+  const D = O.drivers;
+  const drivers = D ? card('Why Spend/GMV moved', `Why Spend/GMV moved ${D.delta >= 0 ? 'up' : 'down'} ${Math.abs(D.delta).toFixed(1)} pts this week`, 'Last 7 days vs the 7 before. Spend/GMV = CPM ÷ (1000 × CTR × click→order × AOV), so the change splits into these four.', tbl([
+    { h: 'Driver', v: (r) => esc(r.label) }, { h: 'Effect on Spend/GMV', r: 1, v: (r) => `${r.points >= 0 ? '+' : ''}${r.points.toFixed(1)} pts`, cls: (r) => (r.points > 0 ? 'bad' : 'good') },
+    { h: 'Last 7 days', r: 1, v: (r) => ({ 'CPM (cost of reach)': inr(L.cpm), 'CTR (ad click rate)': pc(L.ctr, 2), 'Click → order rate': pc(L.c2pr, 2), AOV: inr(L.aov) })[r.label] },
+    { h: 'The 7 before', r: 1, v: (r) => ({ 'CPM (cost of reach)': inr(P.cpm), 'CTR (ad click rate)': pc(P.ctr, 2), 'Click → order rate': pc(P.c2pr, 2), AOV: inr(P.aov) })[r.label] }
+  ], D.rows)) : '';
+
+  // PMF snapshot from the rest of the dashboard.
+  const allK = Object.values(d.kpis || {});
+  const wins = allK.reduce((a, k) => a + (k.winners || 0), 0), losses = allK.reduce((a, k) => a + (k.losses || 0), 0), tested = allK.reduce((a, k) => a + (k.tested || 0), 0);
+  const rp = d.customers?.repeat, b14 = d.repeatBench?.rates?.d14, w14 = rp?.curves?.find((c) => c.days === 14)?.khoj;
+  const pers = d.customers?.audience?.personalisation;
+  const snap = card('PMF snapshot', 'PMF snapshot', 'Headlines from the PMF View', kpiRow([
+    ['Products tested', int(tested), `${int(wins)} winners · ${int(losses)} killed`],
+    ['Success rate', wins + losses ? pc(wins / (wins + losses) * 100) : '—', 'winners ÷ decided trials'],
+    ['New to ShopDeck', pc(d.customers?.audience?.newToSdPct, 1), 'of Khoj buyers'],
+    ['Back within 14 days', w14?.eligible ? pc(w14.pct, 1) : '—', b14 !== undefined && b14 !== null ? `parent sellers: ${pc(b14, 1)}` : ''],
+    ['Orders predictable (30 days)', pers ? pc((pers.browsing?.levels.find((x) => x.key === 'all_any') || pers.levels.find((x) => x.key === 'any'))?.d30, 1) : '—', 'from ShopDeck history']
+  ]) + `<p class="small"><button type="button" class="btn" data-tab="pmf">Open the PMF View</button></p>`);
+
+  const ops = card('Operations', 'Operations', 'From the day-wise question', kpiRow([
+    ['Not dispatched, older than yesterday', int(O.backlog), 'orders'],
+    ['Yesterday not dispatched', int(O.daily.find((r) => r.date === O.yesterday)?.notDispatched), `of ${int(O.daily.find((r) => r.date === O.yesterday)?.nonCancelled)} orders`],
+    ['Cancelled, last 7 days', pc(L.cancelPct, 1), `${int(L.cancelled)} orders`],
+    ['Cost per order', inr(L.cpo), `was ${inr(P.cpo)}`]
+  ]));
+  return head + trend + unit + drivers + weeks + snap + ops;
+}
+
+// ---------- Scaling Plan & Status ----------
+function viewPlan(d) {
+  const S = d.scaling;
+  if (!S) return '';
+  const P = S.plan, A = P.assumptions, L = S.labels;
+  const pa = (a, p, f, cls) => {   // actual over plan
+    const av = a === null || a === undefined ? null : a, pv = p === null || p === undefined ? null : p;
+    if (av === null && pv === null) return '—';
+    if (av === null) return `<span class="muted">${f(pv)}</span>`;
+    return `<div class="${cls ? cls(av, pv) : ''}">${f(av)}</div>${pv !== null ? `<div class="muted small">plan ${f(pv)}</div>` : ''}`;
+  };
+  const hi = (av, pv) => (pv ? (av >= pv * 0.9 ? 'good' : 'bad') : '');
+  const lo = (av, pv) => (pv ? (av <= pv * 1.1 ? 'good' : 'bad') : '');
+  const col = (h, get, f, cls) => ({ h, r: 1, v: (r) => {
+    const pv = r.plan ? get(r.plan) : null;
+    if (!r.actual) return pv === null || pv === undefined ? '—' : `<span class="muted">${f(pv)}</span>`;
+    const av = get(r.actual);
+    if (av === null || av === undefined || !Number.isFinite(av)) return `<div class="muted">—</div>${pv !== null && pv !== undefined ? `<div class="muted small">plan ${f(pv)}</div>` : ''}`;
+    return pa(av, pv, f, cls);
+  } });
+  const k = (v) => (v === null || v === undefined ? '—' : v >= 1000 ? `₹${(v / 1000).toFixed(1)}k` : inr(v));
+  const p1 = (v) => (v === null || v === undefined ? '—' : `${v.toFixed(0)}%`);
+  const n0 = (v) => (v === null || v === undefined ? '—' : Math.round(v).toLocaleString('en-IN'));
+  const rows = S.rows;
+  const table = tbl([
+    { h: 'Week', v: (r) => `<strong>${shortDate(r.week)}</strong>${r.current ? ' ' + chip('blue', 'now') : ''}${r.actual?.partial ? `<div class="muted small">${r.actual.days} days so far</div>` : ''}` },
+    col('DAS total', (x) => x.das.total, k, hi), col('DAS Meta', (x) => x.das.meta, k), col('DAS Google', (x) => x.das.google, k),
+    col('DAS Meta catalog', (x) => x.das.catalog, k), col('DAS Meta winners', (x) => x.das.winners, k), col('DAS testing', (x) => x.das.testing, k),
+    col('S/GMV catalog', (x) => x.sgmv.catalog, p1, lo), col('S/GMV winners', (x) => x.sgmv.winners, p1, lo), col('S/GMV testing', (x) => x.sgmv.testing, p1, lo), col('S/GMV Google', (x) => x.sgmv.google, p1, lo),
+    col('S/GMV overall', (x) => x.sgmv.overall, p1, lo), col('GMV / day', (x) => x.gmvPerDay, k, hi), col('AOV', (x) => x.aov, inr, hi), col('Orders / day', (x) => x.ordersPerDay, n0, hi),
+    col('Tested (lifetime)', (x) => x.testing.tested, n0, hi), col('In testing', (x) => x.testing.inTesting, n0, hi), col('Winners', (x) => x.testing.winners, n0, hi), col('Killed', (x) => x.testing.killed, n0),
+    col('Success %', (x) => x.testing.successPct, p1, hi)
+  ], rows, { min: 1900 });
+  const cur = rows.find((r) => r.current);
+  const statusKpis = cur ? kpiRow([
+    ['Daily spend', `${k(cur.actual?.das.total)} <span class="muted small">/ ${k(cur.plan?.das.total)}</span>`, 'actual / plan, this week'],
+    ['Orders / day', `${n0(cur.actual?.ordersPerDay)} <span class="muted small">/ ${n0(cur.plan?.ordersPerDay)}</span>`, 'actual / plan'],
+    ['GMV / day', `${k(cur.actual?.gmvPerDay)} <span class="muted small">/ ${k(cur.plan?.gmvPerDay)}</span>`, 'actual / plan'],
+    ['Spend / GMV', `${p1(cur.actual?.sgmv.overall)} <span class="muted small">/ ${p1(cur.plan?.sgmv.overall)}</span>`, 'actual / plan'],
+    ['Winners (lifetime)', `${n0(cur.actual?.testing.winners)} <span class="muted small">/ ${n0(cur.plan?.testing.winners)}</span>`, 'actual / plan']
+  ]) : '';
+  const checks = tbl([
+    { h: 'Assumption', v: (c) => `${esc(c.label)}${c.note ? ` <span class="muted small">${esc(c.note)}</span>` : ''}` },
+    { h: 'Plan', r: 1, v: (c) => (c.assumed === null ? '—' : c.unit === '₹' ? inr(c.assumed) : `${Math.round(c.assumed)}${c.unit}`) },
+    { h: 'Actual', r: 1, v: (c) => (c.actual === null || c.actual === undefined ? '—' : c.unit === '₹' ? inr(c.actual) : `${c.actual.toFixed(c.unit === '%' ? 1 : 0)}${c.unit}`) },
+    { h: 'Holding?', r: 1, v: (c) => (c.ok === null ? '<span class="muted small">no data yet</span>' : c.ok ? chip('green', 'On track') : chip('orange', 'Off plan')) }
+  ], S.checks);
+  const where = card('Where we are', `Where we are · week of ${shortDate(S.currentWeek)}`, 'Actual against plan this week, whether the plan\'s assumptions are holding, and what could stop the plan', statusKpis +
+    `<div class="grid-2"><div><div class="group-title">Assumptions</div><div style="margin-top:8px">${checks}</div></div><div><div class="group-title">Risks to the plan</div>${S.risks.length ? `<ul class="small" style="margin:8px 0 0;padding-left:18px;line-height:1.6">${S.risks.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : '<p class="small muted">None flagged.</p>'}</div></div>`);
+  const weekCard = card('Week-wise plan', 'Week-wise plan and actuals', 'Each cell: actual (green on/above plan, orange behind) with the plan underneath; future weeks show the plan. DAS = daily average spend. Meta S/GMV per bucket is Meta-reported (×' + d.settings.metaSgmvFactor + ' correction) and over-counts across buckets; overall S/GMV is actual orders. Google = day-wise total spend − Meta spend.', table);
+  // Editor
+  const inp = (name, v, w = 90) => `<input name="${name}" value="${esc(v)}" inputmode="decimal" style="width:${w}px;min-height:34px;border:1px solid var(--line);border-radius:6px;padding:0 6px;background:var(--surface);color:inherit;font:inherit;font-size:13px">`;
+  const planWeeks = rows.filter((r) => r.plan).map((r) => r.week);
+  const das = ['testing', 'catalog', 'metaOther', 'google'];
+  const editor = `<details ${P.saved ? '' : 'open'}><summary style="cursor:pointer;font-weight:600">Edit the plan</summary>
+    <form id="planForm" style="margin-top:12px;display:flex;flex-direction:column;gap:14px">
+      <div class="settings">${[['aov', 'AOV (₹)', A.aov], ['successPct', 'Trial success %', A.successPct], ['trialBudget', 'Trial budget (₹/day)', A.trialBudget], ['trialDays', 'Days per trial', A.trialDays], ['winnerDas', 'Avg daily budget per winner (₹)', A.winnerDas], ['winnerLifeWeeks', 'Weeks a winner scales', A.winnerLifeWeeks]].map(([n2, l, v]) => `<div class="field"><label>${esc(l)}</label>${inp('a_' + n2, v, 120)}</div>`).join('')}
+      ${['testing', 'winners', 'catalog', 'metaOther', 'google'].map((b) => `<div class="field"><label>Spend/GMV % · ${esc(L[b])}</label>${inp('s_' + b, A.sgmv[b], 120)}</div>`).join('')}
+      <div class="field"><label>Plan starts (week of)</label>${inp('startWeek', P.startWeek, 120)}</div><div class="field"><label>Weeks</label>${inp('weeks', P.weeks, 120)}</div></div>
+      <div class="table-box"><table style="min-width:${200 + planWeeks.length * 100}px"><thead><tr><th>Daily spend (₹)</th>${planWeeks.map((w) => `<th class="r">${shortDate(w)}</th>`).join('')}</tr></thead><tbody>
+        ${das.map((b) => `<tr><td>${esc(L[b])}</td>${P.das[b].map((v, i) => `<td class="r">${inp(`d_${b}_${i}`, v, 84)}</td>`).join('')}</tr>`).join('')}
+        <tr><td class="muted">Meta winners (from success % × trials)</td>${rows.filter((r) => r.plan).map((r) => `<td class="r muted small">${k(r.plan.das.winners)}</td>`).join('')}</tr>
+      </tbody></table></div>
+      <div style="display:flex;gap:8px"><button type="submit" class="btn btn-primary">Save plan</button><button type="button" class="btn" id="resetPlan">Reset to default</button></div>
+    </form></details>`;
+  return where + weekCard + card('Plan editor', 'The plan', P.saved ? 'Saved plan. Winners spend follows from the testing budget, success % and the winner budget.' : 'Default placeholder plan: set your weekly budgets and assumptions and save.', editor);
+}
+
+// ---------- PMF View ----------
+const PMF_SUBS = [['summary', 'Overall summary'], ['hits', 'Hit % & Scalability'], ['quality', 'Customer Quality'], ['early', 'Early signs: repeats & likability'], ['repeat', 'Actual Repeats'], ['cross', 'Cross Selling'], ['data', 'Using ShopDeck\'s data advantage']];
+function viewPmf(d) {
+  const sub = PMF_SUBS.some(([k2]) => k2 === ui.sub) ? ui.sub : 'summary';
+  const bar = `<div class="seg-tabs" role="tablist" aria-label="PMF View" style="flex-wrap:wrap">${PMF_SUBS.map(([k2, l]) => `<button type="button" class="seg" role="tab" data-sub="${k2}" aria-pressed="${k2 === sub}">${esc(l)}</button>`).join('')}</div>`;
+  const body = {
+    summary: () => viewPmfSummary(d),
+    hits: () => viewRoom(d) + viewCover(d),
+    quality: () => viewAudience(d, 'quality'),
+    early: () => planned('Early signs on repeats & likability', 'To come', [['What goes here', ['Leading signals that predict repeat before repeat itself shows up: delivery experience, ratings and reviews, wishlist and return visits, post-order survey']]], []),
+    repeat: () => viewRepeat(d),
+    cross: () => viewCross(d),
+    data: () => viewAudience(d, 'data')
+  }[sub]();
+  return bar + body;
+}
+
+function viewPmfSummary(d) {
+  const allK = Object.values(d.kpis || {});
+  const S = (f) => allK.reduce((a, k) => a + (k[f] || 0), 0);
+  const wins = S('winners'), losses = S('losses'), tested = S('tested'), live = S('liveTrials'), scaling = S('scaling');
+  const sr = wins + losses ? wins / (wins + losses) * 100 : null;
+  const ci = wins + losses ? 1.96 * Math.sqrt((sr / 100) * (1 - sr / 100) / (wins + losses)) * 100 : null;
+  const U = d.universe?.byCat; const tc = U ? CATS.reduce((a, c) => ({ h: a.h + (U[c]?.hero || 0), l: a.l + (U[c]?.heroLive || 0) }), { h: 0, l: 0 }) : null;
+  const ladder = d.ladder || [];
+  const a = d.customers?.audience, cmp = a?.compare;
+  const rp = d.customers?.repeat, RB = d.repeatBench;
+  const w7 = rp?.curves.find((c) => c.days === 7)?.khoj, w14 = rp?.curves.find((c) => c.days === 14)?.khoj;
+  const M = d.sessions?.matched, MM = M ? Object.fromEntries(M.metrics.map((m) => [m.key, m])) : {};
+  const B = d.sessions?.beyond;
+  const pers = a?.personalisation, V = d.visitorPersonalisation;
+  const verdict = (ok, warn) => (ok === null ? chip('muted', 'Waiting for data') : ok ? chip('green', 'Encouraging') : warn ? chip('amber', 'Watch') : chip('orange', 'Concern'));
+  const section = (sub, title, v, cards, line) => `<section class="card" aria-label="${esc(title)}"><div class="card-head"><div><h2>${esc(title)}</h2>${line ? `<span class="muted small">${esc(line)}</span>` : ''}</div><div style="flex-direction:row;gap:8px;align-items:center">${v}<button type="button" class="btn" data-sub="${sub}" style="min-height:32px;padding:4px 10px;font-size:12px">Open</button></div></div>${kpiRow(cards)}</section>`;
+  const repOk = w14?.eligible && RB?.rates?.d14 !== null && RB?.rates?.d14 !== undefined ? w14.pct >= RB.rates.d14 * 0.9 : null;
+  const crossOk = MM.productsPerSession?.khoj !== undefined && MM.productsPerSession?.bench ? MM.productsPerSession.khoj >= MM.productsPerSession.bench * 0.9 : null;
+  const anyPred = pers ? (pers.browsing?.levels.find((x) => x.key === 'all_any') || pers.levels.find((x) => x.key === 'any')) : null;
+  return [
+    section('hits', 'Hit % & Scalability', verdict(sr === null ? null : sr >= 40, sr >= 25), [
+      ['Products tested', int(tested), `${int(live)} in testing now`], ['Success rate', pc(sr), sr !== null ? `${wins} of ${wins + losses} decided · ±${Math.round(ci)} pts` : 'no verdicts yet'],
+      ['Winners scaling', int(scaling), `${ladder.length} scale ad sets`], ['Hero coverage (test categories)', tc && tc.h ? pc(tc.l / tc.h * 100, 1) : '—', tc ? `${int(tc.l)} of ${int(tc.h)} ShopDeck heroes live` : '']
+    ], 'Do hero products win at a useful rate, and how far do winners scale?'),
+    section('quality', 'Customer Quality', verdict(cmp ? cmp.khoj.rtoPct <= cmp.shopdeckBefore.rtoPct : null, true), [
+      ['New to ShopDeck', pc(a?.newToSdPct, 1), 'of Khoj buyers'], ['Online orders', pc(100 - (cmp?.khoj.codPct ?? NaN), 1), cmp ? `same customers on sellers: ${pc(100 - cmp.shopdeckBefore.codPct, 1)}` : ''],
+      ['RTO', pc(cmp?.khoj.rtoPct, 1), cmp ? `same customers on sellers: ${pc(cmp.shopdeckBefore.rtoPct, 1)}` : ''], ['Cancelled', pc(cmp?.khoj.cancelPct, 1), cmp ? `on sellers: ${pc(cmp.shopdeckBefore.cancelPct, 1)}` : '']
+    ], 'Who buys, and are they better customers than on seller sites?'),
+    `<section class="card" aria-label="Early signs"><div class="card-head"><div><h2>Early signs on repeats &amp; likability</h2><span class="muted small">Leading signals of repeat: to come</span></div>${chip('muted', 'To come')}</div></section>`,
+    section('repeat', 'Actual Repeats', verdict(repOk, true), [
+      ['Back within 7 days', w7?.eligible ? pc(w7.pct, 1) : '—', RB ? `parent sellers: ${pc(RB.rates.d7, 1)}` : ''], ['Back within 14 days', w14?.eligible ? pc(w14.pct, 1) : '—', RB ? `parent sellers: ${pc(RB.rates.d14, 1)}` : ''],
+      ['Repeat from another seller', rp?.kinds.lines ? pc(rp.kinds.otherParent / rp.kinds.lines * 100) : '—', 'of repeat order lines'], ['Repeat buyers so far', int(rp?.repeaters), `of ${int(rp?.customers)}`]
+    ], 'Do Khoj buyers come back, and as often as on the sellers\' own sites?'),
+    section('cross', 'Cross Selling', verdict(crossOk, true), [
+      ['Products viewed / session', MM.productsPerSession ? `${MM.productsPerSession.khoj?.toFixed(2)} vs ${MM.productsPerSession.bench?.toFixed(2)}` : '—', 'Khoj vs same first products on seller sites'],
+      ['Sessions seeing only the first product', MM.singlePct ? `${pc(MM.singlePct.khoj)} vs ${pc(MM.singlePct.bench)}` : '—', ''],
+      ['Buy-now on a different product', pc(B?.otherPct, 1), 'than the one they landed on'], ['…from another seller', pc(B?.otherAnotherSellerPct, 1), 'of those']
+    ], 'Does an all-hero marketplace get people to look and buy beyond the ad\'s product?'),
+    section('data', 'Using ShopDeck\'s data advantage', verdict(anyPred ? anyPred.d30 >= 30 : null, true), [
+      ['Orders predictable, last 7 days', pc(anyPred?.d7, 1), 'from orders and browsing on ShopDeck'], ['Orders predictable, last 30 days', pc(anyPred?.d30, 1), ''],
+      ['Visitors identifiable at landing', pc(V?.linkedPct, 1), 'could be personalised'], ['Conversion if personalised', V?.estimate?.conservative ? `${pc(V.conversionPct, 2)} → ${pc(V.estimate.conservative.newConversionPct, 2)}` : '—', 'upper bound']
+    ], 'Can ShopDeck\'s history tell us what a visitor will buy?')
+  ].join('');
+}
+
+function qualityTopCard(d) {
+  const a = d.customers?.audience, cmp = a?.compare, O = d.overview;
+  if (!cmp && !O) return '';
+  const pay = a?.byPayment || [];
+  const cod = pay.find((x) => x.key === 'COD'), pre = pay.find((x) => x.key === 'Prepaid');
+  return card('Customer quality at a glance', 'Customer quality at a glance', 'Khoj orders vs the same customers on ShopDeck seller sites (before Khoj), plus the last 7 days from the day-wise and P&L questions', kpiRow([
+    ['Online orders, last 7 days', pc(O?.last7.onlinePct, 1), O ? `the 7 before: ${pc(O.prev7.onlinePct, 1)}` : ''],
+    ['Online share: Khoj vs sellers', cmp ? `${pc(100 - cmp.khoj.codPct, 1)} vs ${pc(100 - cmp.shopdeckBefore.codPct, 1)}` : '—', 'same customers'],
+    ['RTO: Khoj vs sellers', cmp ? `${pc(cmp.khoj.rtoPct, 1)} vs ${pc(cmp.shopdeckBefore.rtoPct, 1)}` : '—', 'of delivered + returned'],
+    ['COD RTO', pc(cod?.rtoPct, 1), pre ? `prepaid: ${pc(pre.rtoPct, 1)}` : ''],
+    ['Cancelled: Khoj vs sellers', cmp ? `${pc(cmp.khoj.cancelPct, 1)} vs ${pc(cmp.shopdeckBefore.cancelPct, 1)}` : '—', ''],
+    ['RTO (P&L, last 7 days)', pc(O?.pnl.last7?.rtoPct, 1), 'includes predicted RTO for orders in transit']
+  ]));
+}
+
 // ---------- Rules ----------
 function viewRules(d) {
   const groups = {};
@@ -814,12 +1072,18 @@ document.addEventListener('click', async (e) => {
   if (rp) { await fetch(`/api/sources/${rp.dataset.repull}/repull`, { method: 'POST' }); ui.repulled = { ...(ui.repulled || {}), [rp.dataset.repull]: true }; render(); return; }
   const pg = e.target.closest('[data-cpage]');
   if (pg) { custUi.page += Number(pg.dataset.cpage); $('custTable').innerHTML = custTableInner(); $('custTable').scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
-  const t = e.target.closest('[data-cat],[data-tab],[data-live],#refresh,#retry,#resetRules');
+  const t = e.target.closest('[data-cat],[data-tab],[data-sub],[data-live],#refresh,#retry,#resetRules,#resetPlan');
   if (!t) return;
   if (t.dataset.cat) { ui.cat = t.dataset.cat; remember(); render(); }
   else if (t.dataset.tab) { ui.tab = t.dataset.tab; remember(); render(); }
+  else if (t.dataset.sub) { ui.sub = t.dataset.sub; remember(); render(); }
   else if (t.dataset.live) { ui.live = t.dataset.live; remember(); render(); }
   else if (t.id === 'refresh' || t.id === 'retry') load(true, true);
+  else if (t.id === 'resetPlan') {
+    if (!confirm('Reset the plan to the default placeholder?')) return;
+    await fetch('/api/plan', { method: 'DELETE' });
+    load(false);
+  }
   else if (t.id === 'resetRules') {
     if (!confirm('Reset every rule to its default?')) return;
     await fetch('/api/settings', { method: 'DELETE' });
@@ -841,6 +1105,19 @@ document.addEventListener('change', async (e) => {
 });
 
 document.addEventListener('submit', async (e) => {
+  if (e.target.id === 'planForm') {
+    e.preventDefault();
+    const f = e.target, v = (n) => Number(f.querySelector(`[name="${n}"]`)?.value);
+    const P = ui.data.scaling.plan;
+    const body = { startWeek: f.querySelector('[name="startWeek"]').value.trim(), weeks: v('weeks'),
+      assumptions: { aov: v('a_aov'), successPct: v('a_successPct'), trialBudget: v('a_trialBudget'), trialDays: v('a_trialDays'), winnerDas: v('a_winnerDas'), winnerLifeWeeks: v('a_winnerLifeWeeks'),
+        sgmv: Object.fromEntries(['testing', 'winners', 'catalog', 'metaOther', 'google'].map((b) => [b, v('s_' + b)])) },
+      das: Object.fromEntries(['testing', 'catalog', 'metaOther', 'google'].map((b) => [b, P.das[b].map((_, i) => v(`d_${b}_${i}`) || 0)])) };
+    const res = await fetch('/api/plan', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    ui.note = res.ok ? 'Plan saved.' : ''; if (!res.ok) ui.msg = 'Could not save the plan.';
+    await load(false);
+    return;
+  }
   if (e.target.id !== 'rules') return;
   e.preventDefault();
   const body = {};

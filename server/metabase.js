@@ -29,7 +29,9 @@ export function parseParams(str) {
 // { parent_sellers: 'a,b,c' } → text variables, passed as is (commas included).
 function textParams(obj) {
   return Object.entries(obj || {}).filter(([, v]) => v !== '' && v !== null && v !== undefined)
-    .map(([k, v]) => ({ type: 'category', target: ['variable', ['template-tag', k]], value: String(v) }));
+    .map(([k, v]) => (/_date$/.test(k)
+      ? { type: 'date/single', target: ['variable', ['template-tag', k]], value: String(v) }
+      : { type: 'category', target: ['variable', ['template-tag', k]], value: typeof v === 'number' ? v : String(v) }));
 }
 
 export async function runCard(cardId, paramStr = '', opts = {}) {
