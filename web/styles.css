@@ -208,3 +208,22 @@ tr.cust summary { cursor: pointer; }
 .status-table td, .status-table th { padding: 10px 14px; }
 .status-table td.num { font-size: 15px; }
 .status-table th.r { min-width: 110px; }
+
+/* Overall Status snapshot tiles */
+.stiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.stile { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px 12px; border: 1px solid var(--line); border-top: 4px solid var(--line); border-radius: 10px; background: var(--surface); min-width: 0; }
+.stile .label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.stile .big { font-size: 30px; font-weight: 700; line-height: 1.1; }
+.stile-good { border-top-color: var(--green); } .stile-good .big { color: var(--green-fg); }
+.stile-warn { border-top-color: var(--amber); } .stile-warn .big { color: var(--amber-fg); }
+.stile-bad { border-top-color: var(--orange); } .stile-bad .big { color: var(--orange-fg); }
+.sbars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; align-items: end; margin-top: 8px; height: 84px; }
+.sb { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; height: 100%; min-width: 0; }
+.sb-v { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.sb-bar { width: 70%; max-width: 34px; border-radius: 3px 3px 0 0; background: var(--line); opacity: .55; }
+.sb-good { background: var(--green); } .sb-warn { background: var(--amber); } .sb-bad { background: var(--orange); } .sb-neutral { background: var(--blue); }
+.sb-on .sb-bar { opacity: 1; } .sb-on .sb-v { color: var(--ink); font-weight: 700; }
+.sb-l { font-size: 10px; color: var(--muted); } .sb-on .sb-l { color: var(--ink); font-weight: 700; }
+@media (max-width: 1000px) { .stiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .stile .big { font-size: 24px; } }
+.seg[aria-pressed="true"] .muted { color: inherit; opacity: .8; }

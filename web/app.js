@@ -1,11 +1,11 @@
 // Khoj Control Room front end. No build step: plain ES modules, rendered from /api/state.
 const CATS = ['Saree', 'Kurti & Suits', 'Jewellery'];
-const ui = { tab: 'status', sub: 'summary', cat: 'All', live: 'all', sig: 'ppo', showDone: true, data: null, busy: false, saving: false, uploading: false, msg: '', note: '' };
+const ui = { tab: 'status', sub: 'summary', win: 'yesterday', cat: 'All', live: 'all', sig: 'ppo', showDone: true, data: null, busy: false, saving: false, uploading: false, msg: '', note: '' };
 try { Object.assign(ui, JSON.parse(localStorage.getItem('khoj-ui') || '{}'), { data: null, busy: false, saving: false, uploading: false, msg: '', note: '' }); } catch {}
 // Older saved tabs → their new home.
 { const OLD = { room: ['pmf', 'hits'], cover: ['pmf', 'hits'], audience: ['pmf', 'quality'], cross: ['pmf', 'cross'], repeat: ['pmf', 'repeat'] };
   if (OLD[ui.tab]) [ui.tab, ui.sub] = OLD[ui.tab]; }
-const remember = () => { try { localStorage.setItem('khoj-ui', JSON.stringify({ tab: ui.tab, sub: ui.sub, cat: ui.cat, live: ui.live, sig: ui.sig, showDone: ui.showDone })); } catch {} };
+const remember = () => { try { localStorage.setItem('khoj-ui', JSON.stringify({ tab: ui.tab, sub: ui.sub, win: ui.win, cat: ui.cat, live: ui.live, sig: ui.sig, showDone: ui.showDone })); } catch {} };
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -828,22 +828,35 @@ function viewStatus(d) {
   if (!O) return card('Overall Status', 'Overall Status', '', '<p class="small muted">Waiting for the day-wise question (Q16083). It is pulled every hour in the background.</p>', chip('amber', 'No data yet'));
   const Wn = O.windows, BE = O.breakevenAdSgmv, PR = O.predictedRto;
   const sg = (v) => (BE === null || v === null || v === undefined ? '' : v <= BE ? 'good' : v <= BE + 3 ? 'warn' : 'bad');
-  const rowsDef = [
-    ['Orders / day', (w) => int(w.ordersPerDay)],
-    ['Cancelled %', (w) => pc(w.cancelPct, 1)],
-    ['Online %', (w) => pc(w.onlinePct, 1)],
-    ['Spend / GMV', (w) => `<span class="${sg(w.sgmv)}">${pc(w.sgmv, 1)}</span>`],
-    ['AOV', (w) => inr(w.aov)],
-    ['Daily avg spend', (w) => inr(w.spendPerDay)],
-    ['Predicted RTO %', (w) => pc(w.predictedRto, 1)],
-    ['CM %', (w) => (w.cmPct === null ? '<span class="muted small">P&amp;L pending</span>' : `<span class="${w.cmPct >= 0 ? 'good' : 'bad'}">${pc(w.cmPct, 1)}</span>`)]
+  // Snapshot: one tile per metric. The big number is the selected window; the mini bars compare all four windows.
+  const sel = Wn.find((w) => w.key === ui.win) || Wn[1];
+  const L7 = Wn.find((w) => w.key === 'l7d');
+  const vsL7 = (better) => (w, get) => { const a = get(w), b = get(L7); if (a === null || b === null || a === undefined || b === undefined || w.key === 'l7d') return 'neutral'; const d2 = better === 'up' ? a - b : b - a; return Math.abs(d2) < Math.abs(b) * 0.03 ? 'neutral' : d2 > 0 ? 'good' : 'bad'; };
+  const M = [
+    { label: 'Orders / day', get: (w) => w.ordersPerDay, fmt: (v) => int(v), tone: vsL7('up'), note: (w) => (w.key === 'today' ? 'so far today' : '') },
+    { label: 'Spend / GMV', get: (w) => w.sgmv, fmt: (v) => pc(v, 1), tone: (w) => { const v = w.sgmv; return BE === null || v === null ? 'neutral' : v <= BE ? 'good' : v <= BE + 3 ? 'warn' : 'bad'; }, note: () => (BE !== null ? `breakeven ${pc(BE, 1)}` : '') },
+    { label: 'CM %', get: (w) => w.cmPct, fmt: (v) => pc(v, 1), tone: (w) => (w.cmPct === null ? 'neutral' : w.cmPct >= 0 ? 'good' : 'bad'), note: (w) => (w.cmPct === null ? 'P&L pending' : 'of NMV, at predicted RTO') },
+    { label: 'Predicted RTO', get: (w) => w.predictedRto, fmt: (v) => pc(v, 1), tone: vsL7('down'), note: () => 'from D-17 to D-10 rates' },
+    { label: 'Daily avg spend', get: (w) => w.spendPerDay, fmt: (v) => inr(v), tone: () => 'neutral', note: (w) => (w.key === 'today' ? 'so far today' : '') },
+    { label: 'AOV', get: (w) => w.aov, fmt: (v) => inr(v), tone: vsL7('up'), note: () => '' },
+    { label: 'Online %', get: (w) => w.onlinePct, fmt: (v) => pc(v, 1), tone: vsL7('up'), note: () => '' },
+    { label: 'Cancelled %', get: (w) => w.cancelPct, fmt: (v) => pc(v, 1), tone: vsL7('down'), note: () => '' }
   ];
-  const head = `<div class="table-box"><table class="status-table"><thead><tr><th></th>${Wn.map((w) => `<th class="r">${esc(w.label)}<div class="muted small" style="font-weight:400;text-transform:none;letter-spacing:0">${w.from === w.to ? shortDate(w.from) : `${shortDate(w.from)}–${shortDate(w.to)}`}</div></th>`).join('')}</tr></thead>
-    <tbody>${rowsDef.map(([l, f]) => `<tr><td><strong>${esc(l)}</strong></td>${Wn.map((w) => `<td class="r num">${w.days ? f(w) : '—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-  const notes = `<div class="small muted" style="line-height:1.6">
-    <div><strong>Predicted RTO</strong>: 1 − delivered ÷ non-cancelled on Khoj orders placed ${shortDate(PR?.from)}–${shortDate(PR?.to)} (D-17 to D-10): COD ${pc(PR?.cod.rtoPct, 1)} (${int(PR?.cod.nonCancelled)} orders), online ${pc(PR?.online.rtoPct, 1)} (${int(PR?.online.nonCancelled)}), weighted by each window's online share. <strong>CM %</strong>: the P&amp;L run at that predicted RTO, as % of NMV.</div>
-    <div><strong>Breakeven Spend/GMV: ${pc(BE, 1)}</strong>, from yesterday's P&amp;L at the predicted RTO, ex-GST. Spend/GMV is green at or under it, amber within 3 points, red above.</div></div>`;
-  const top = card('Snapshot', 'Snapshot', `Today is ${O.daily.find((r) => r.date === O.today) ? 'so far' : 'not in yet'} · days run midnight to midnight IST`, head + notes);
+  const short = { today: 'Today', yesterday: 'Yday', l3d: 'L3D', l7d: 'L7D' };
+  const tile = (m) => {
+    const v = m.get(sel), tn = m.tone(sel, m.get);
+    const vals = Wn.map((w) => m.get(w));
+    const mx = Math.max(...vals.filter((x) => x !== null && x !== undefined && Number.isFinite(x)).map(Math.abs), 0) || 1;
+    const bars = Wn.map((w, i) => {
+      const x = vals[i], h = x === null || x === undefined || !Number.isFinite(x) ? 0 : Math.max(3, (Math.abs(x) / mx) * 44);
+      const tw = m.tone(w, m.get);
+      return `<div class="sb${w.key === sel.key ? ' sb-on' : ''}" title="${esc(w.label)}: ${esc(x === null || x === undefined ? '—' : m.fmt(x))}"><span class="sb-v num">${x === null || x === undefined ? '—' : m.fmt(x)}</span><span class="sb-bar sb-${tw}" style="height:${h}px"></span><span class="sb-l">${short[w.key]}</span></div>`;
+    }).join('');
+    return `<div class="stile stile-${tn}"><span class="label">${esc(m.label)}</span><span class="big num">${v === null || v === undefined ? '—' : m.fmt(v)}</span><span class="small muted">${esc(m.note(sel) || '')}</span><div class="sbars">${bars}</div></div>`;
+  };
+  const toggle = `<div class="seg-tabs" role="tablist" aria-label="Window">${Wn.map((w) => `<button type="button" class="seg" data-win="${w.key}" aria-pressed="${w.key === sel.key}">${esc(w.label)} <span class="muted small" style="font-weight:400">${w.from === w.to ? shortDate(w.from) : `${shortDate(w.from)}–${shortDate(w.to)}`}</span></button>`).join('')}</div>`;
+  const notes = `<p class="small muted" style="margin:0;line-height:1.6"><strong>Predicted RTO</strong>: 1 − delivered ÷ non-cancelled on Khoj orders placed ${shortDate(PR?.from)}–${shortDate(PR?.to)}: COD ${pc(PR?.cod.rtoPct, 1)} (${int(PR?.cod.nonCancelled)} orders), online ${pc(PR?.online.rtoPct, 1)} (${int(PR?.online.nonCancelled)}), weighted by each window's online share. <strong>CM %</strong>: the P&amp;L at that RTO. <strong>Breakeven ${pc(BE, 1)}</strong>: yesterday's P&amp;L at the predicted RTO, ex-GST. Colours: Spend/GMV vs breakeven; CM by sign; the rest vs L7D.</p>`;
+  const top = card('Snapshot', 'Snapshot', '', toggle + `<div class="stiles">${M.map(tile).join('')}</div>` + notes);
 
   const R = O.rolling;
   const lab = R.map((r) => shortDate(r.date));
@@ -1192,11 +1205,12 @@ document.addEventListener('click', async (e) => {
   if (rp) { await fetch(`/api/sources/${rp.dataset.repull}/repull`, { method: 'POST' }); ui.repulled = { ...(ui.repulled || {}), [rp.dataset.repull]: true }; render(); return; }
   const pg = e.target.closest('[data-cpage]');
   if (pg) { custUi.page += Number(pg.dataset.cpage); $('custTable').innerHTML = custTableInner(); $('custTable').scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
-  const t = e.target.closest('[data-cat],[data-tab],[data-sub],[data-live],#refresh,#retry,#resetRules,#resetPlan');
+  const t = e.target.closest('[data-cat],[data-tab],[data-sub],[data-win],[data-live],#refresh,#retry,#resetRules,#resetPlan');
   if (!t) return;
   if (t.dataset.cat) { ui.cat = t.dataset.cat; remember(); render(); }
   else if (t.dataset.tab) { ui.tab = t.dataset.tab; remember(); render(); }
   else if (t.dataset.sub) { ui.sub = t.dataset.sub; remember(); render(); }
+  else if (t.dataset.win) { ui.win = t.dataset.win; remember(); render(); }
   else if (t.dataset.live) { ui.live = t.dataset.live; remember(); render(); }
   else if (t.id === 'refresh' || t.id === 'retry') load(true, true);
   else if (t.id === 'resetPlan') {

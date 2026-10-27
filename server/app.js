@@ -83,6 +83,11 @@ export function createApi(store) {
       const ev = mem.events || (await getKV('source:events'));
       for (const r of ev?.rows || []) if (String(r.seller_id) === settings.khojSellerId && r.landing_product && idx.byId.has(String(r.landing_product))) wanted.add(String(r.landing_product));
       const clean = (s) => String(s || '').replace(/[|;]/g, ' ');
+      if (name === 'prodQuality') {
+        // Only what Khoj has sold, with a known parent product: keeps the parameter short.
+        const sold = new Set((history.rows || []).filter((x) => x.s === settings.khojSellerId && idx.byId.has(x.p)).map((x) => x.p));
+        return { khoj_products: [...sold].filter((id) => k2s.has(id)).flatMap((id) => { const p = idx.byId.get(id); return [id, ...(p.skus || [])].map((key) => [key, p.seller, k2s.get(id), p.cat].map(clean).join('|')); }).join(';') };
+      }
       // Each product is listed under its product id and its SKU ids, whichever the events carry.
       return { khoj_products: [...wanted].flatMap((id) => { const p = idx.byId.get(id); return [id, ...(p.skus || [])].map((key) => [key, p.seller, k2s.get(id) || '', p.cat].map(clean).join('|')); }).join(';') };
     }
