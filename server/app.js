@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES, EVERY_HOURS, PHASE } from './sources.js';
-import { khojOrderWeights, parentSellerList } from './benchmarks.js';
+import { khojOrderWeights, parentSellerList, analyseProductQuality } from './benchmarks.js';
 import { buildProductIndex } from './engine.js';
 import { compute, todayIST, day } from './engine.js';
 import { addDaysIST, mondayOf, parseDaywise, aggDays, predictRto, rtoForMix } from './overview.js';
@@ -103,7 +103,9 @@ export function createApi(store) {
     const today = todayIST(), yest = addDaysIST(today, -1);
     const daily = parseDaywise(dw.rows || []);
     const launch = daily[0]?.date || addDaysIST(yest, -27);
-    const pred = predictRto(hist.rows || [], settings.khojSellerId, today, { from: day(settings.predRtoFrom), to: day(settings.predRtoTo) });
+    const pqSrc = await getSource('prodQuality');
+    const sellerOnlineRto = pqSrc.rows?.length ? analyseProductQuality(pqSrc.rows)?.onlineRto?.seller ?? null : null;
+    const pred = predictRto(hist.rows || [], settings.khojSellerId, today, { from: day(settings.predRtoFrom), to: day(settings.predRtoTo) }, sellerOnlineRto);
     const rtoOf = (start, end) => {
       const a = aggDays(daily.filter((r) => r.date >= start && r.date <= end));
       const v = rtoForMix(pred, a.onlinePct);

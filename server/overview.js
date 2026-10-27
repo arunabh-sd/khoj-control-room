@@ -49,10 +49,12 @@ function pnlRow(r) {
 }
 
 // Predicted RTO from Khoj's own orders placed D-17 to D-10 (old enough to have settled): RTO = 1 − delivered ÷
-// non-cancelled, separately for COD and online. Order level: delivered if any line was delivered.
+// non-cancelled, separately for COD and online. Enqueued / invalid / initiated orders never reach the data (the questions
+// drop them); cancelled or cancellation-initiated orders are left out; of the rest, delivered counts as delivered and
+// everything else as RTO. Order level: delivered if any line was delivered.
 const isCodPm = (pm) => pm === 'cod' || pm === 'partial-cod';
 const istDay = (t) => new Date((t + 330) * 60000).toISOString().slice(0, 10);
-export function predictRto(historyRows, khojSellerId, today, window = {}) {
+export function predictRto(historyRows, khojSellerId, today, window = {}, onlineRtoOverride = null) {
   const from = window.from || addDaysIST(today, -17), to = window.to || addDaysIST(today, -10);
   const orders = new Map();
   for (const x of historyRows || []) {
@@ -71,7 +73,11 @@ export function predictRto(historyRows, khojSellerId, today, window = {}) {
   }
   const rate = (b) => (b.nonCancelled ? (1 - b.delivered / b.nonCancelled) * 100 : null);
   const all = { nonCancelled: g.cod.nonCancelled + g.online.nonCancelled, delivered: g.cod.delivered + g.online.delivered };
-  return { from, to, cod: { ...g.cod, rtoPct: rate(g.cod) }, online: { ...g.online, rtoPct: rate(g.online) }, all: { ...all, rtoPct: rate(all) } };
+  // Online RTO: the base sellers' online RTO on the same products (Khoj's own online sample is small and noisy).
+  const onlineActual = rate(g.online);
+  const online = { ...g.online, actualRtoPct: onlineActual, rtoPct: onlineRtoOverride ?? onlineActual, fromSellers: onlineRtoOverride !== null && onlineRtoOverride !== undefined };
+  const allRto = all.nonCancelled ? ((g.cod.nonCancelled * (rate(g.cod) ?? 0)) + (g.online.nonCancelled * (online.rtoPct ?? 0))) / all.nonCancelled : null;
+  return { from, to, cod: { ...g.cod, rtoPct: rate(g.cod) }, online, all: { ...all, rtoPct: allRto } };
 }
 // A window's predicted RTO: COD and online rates weighted by the window's own payment mix.
 export function rtoForMix(pred, onlinePct) {
@@ -119,13 +125,13 @@ const aggNR = (list, nDays) => {
   return { newPerDay: s.newOrders / nDays, repeatPerDay: s.repeatOrders / nDays, newOnlinePct: pct(s.newOnline, s.newOrders), repeatOnlinePct: pct(s.repeatOnline, s.repeatOrders), repeatPct: pct(s.repeatOrders, tot), total: tot };
 };   // P&L marketing includes 18% GST; ad spend in the day-wise question doesn't
 
-export function computeOverview({ daywiseRows, pnlRows, historyRows, orderRows, khojSellerId, sessionMinutes = 30, rtoWindow, today }) {
+export function computeOverview({ daywiseRows, pnlRows, historyRows, orderRows, khojSellerId, sessionMinutes = 30, rtoWindow, onlineRtoOverride = null, today }) {
   const daily = parseDaywise(daywiseRows);
   if (!daily.length) return null;
   const complete = daily.filter((r) => r.date < today);
   const yest = addDaysIST(today, -1);
   const inRange = (a, b) => daily.filter((r) => r.date >= a && r.date <= b);
-  const pred = predictRto(historyRows, khojSellerId, today, rtoWindow);
+  const pred = predictRto(historyRows, khojSellerId, today, rtoWindow, onlineRtoOverride);
   const pnl = (pnlRows || []).map(pnlRow);
   const pnlBy = Object.fromEntries(pnl.map((p) => [p.window, p]));
 
@@ -157,7 +163,7 @@ export function computeOverview({ daywiseRows, pnlRows, historyRows, orderRows, 
     const nrd = NR ? NR.days.find((x) => x.date === r.date) : null;
     const nrw = NR && NR.asOf >= r.date ? aggNR(nrIn(win[0].date, r.date), win.length) : null;
     return { date: r.date, orders: r.orders, spend: r.spend, gmv: r.gmv, sgmv: pct(r.spend, r.gmv), sgmv7: ok ? a.sgmv : null, orders7: ok ? a.ordersPerDay : null, online7: ok ? a.onlinePct : null, aov7: ok ? a.aov : null, cancel7: ok ? a.cancelPct : null,
-      repeatPct: nrd ? pct(nrd.repeatOrders, nrd.newOrders + nrd.repeatOrders) : null, repeatPct7: ok && nrw ? nrw.repeatPct : null,
+      repeatPct: nrd ? pct(nrd.repeatOrders, nrd.newOrders + nrd.repeatOrders) : null, repeatPct7: ok && nrw ? nrw.repeatPct : null, newOnline7: ok && nrw ? nrw.newOnlinePct : null, repeatOnline7: ok && nrw ? nrw.repeatOnlinePct : null,
       newOrders: nrd ? nrd.newOrders : null, repeatOrders: nrd ? nrd.repeatOrders : null, onlinePct: pct(r.online, r.orders), cancelPct: pct(r.cancelled, r.orders), aov: r.orders ? r.gmv / r.orders : null };
   });
 

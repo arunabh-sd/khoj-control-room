@@ -248,3 +248,5 @@ tr.cust summary { cursor: pointer; }
 .kgrid-early { grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 1px solid var(--line-soft); }
 .kgrid-early .kcell:first-child { border-left: 0; padding-left: 0; }
 @media (max-width: 1000px) { .kgrid-early { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.kgrid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1000px) { .kgrid-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

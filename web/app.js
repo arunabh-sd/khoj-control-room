@@ -855,8 +855,8 @@ function viewStatus(d) {
   const groups = [
     ['Volume', [
       { label: 'Orders / day', v: int(sel.ordersPerDay), sub: cmpLine(sel.ordersPerDay, ref.w.ordersPerDay, { fmt: f0 }), sp: R14.map((r) => r.orders), note: sel.key === 'today' ? 'so far today' : '' },
-      { label: 'New-user orders / day', v: nrS ? int(nrS.newPerDay) : '—', sub: nrS ? `<span class="muted">online ${pc(nrS.newOnlinePct, 1)}</span> · ${cmpLine(nrS.newPerDay, nrR?.newPerDay, { fmt: f0 })}` : nrNote, sp: R14.map((r) => r.newOrders) },
-      { label: 'Repeat orders / day', v: nrS ? int(nrS.repeatPerDay) : '—', sub: nrS ? `<span class="muted">online ${pc(nrS.repeatOnlinePct, 1)}</span> · ${cmpLine(nrS.repeatPerDay, nrR?.repeatPerDay, { fmt: f0 })}` : nrNote, sp: R14.map((r) => r.repeatOrders) },
+      { label: 'New-user orders / day', v: nrS ? int(nrS.newPerDay) : '—', sub: nrS ? cmpLine(nrS.newPerDay, nrR?.newPerDay, { fmt: f0 }) : nrNote, sp: R14.map((r) => r.newOrders) },
+      { label: 'Repeat orders / day', v: nrS ? int(nrS.repeatPerDay) : '—', sub: nrS ? cmpLine(nrS.repeatPerDay, nrR?.repeatPerDay, { fmt: f0 }) : nrNote, sp: R14.map((r) => r.repeatOrders) },
       { label: 'Repeat share of orders', v: nrS ? pc(nrS.repeatPct, 1) : '—', sub: nrS ? cmpLine(nrS.repeatPct, nrR?.repeatPct, { fmt: f1, pts: true }) : nrNote, sp: R14.map((r) => r.repeatPct7) }
     ]],
     ['Efficiency', [
@@ -867,13 +867,15 @@ function viewStatus(d) {
     ]],
     ['Quality', [
       { label: 'Online %', v: pc(sel.onlinePct, 1), sub: cmpLine(sel.onlinePct, ref.w.onlinePct, { fmt: f1, pts: true }), sp: R14.map((r) => r.online7) },
+      { label: 'Online % · new users', v: nrS ? pc(nrS.newOnlinePct, 1) : '—', sub: nrS ? cmpLine(nrS.newOnlinePct, nrR?.newOnlinePct, { fmt: f1, pts: true }) : nrNote, sp: R14.map((r) => r.newOnline7) },
+      { label: 'Online % · repeat users', v: nrS ? pc(nrS.repeatOnlinePct, 1) : '—', sub: nrS ? cmpLine(nrS.repeatOnlinePct, nrR?.repeatOnlinePct, { fmt: f1, pts: true }) : nrNote, sp: R14.map((r) => r.repeatOnline7) },
       { label: 'Cancelled %', v: pc(sel.cancelPct, 1), sub: cmpLine(sel.cancelPct, ref.w.cancelPct, { fmt: f1, pts: true, better: 'down' }), sp: R14.map((r) => r.cancel7) },
-      { label: 'Predicted RTO', v: pc(sel.predictedRto, 1), sub: `<span class="muted">COD ${pc(PR?.cod.rtoPct, 1)} · online ${pc(PR?.online.rtoPct, 1)}</span>`, sp: [] }
+      { label: 'Predicted RTO', v: pc(sel.predictedRto, 1), sub: `<span class="muted">COD ${pc(PR?.cod.rtoPct, 1)} · online ${pc(PR?.online.rtoPct, 1)}${PR?.online.fromSellers ? ' (sellers)' : ''}</span>`, sp: [] }
     ]]
   ];
   const toggle = `<div class="wseg" role="tablist" aria-label="Window">${Wn.map((w) => `<button type="button" data-win="${w.key}" aria-pressed="${w.key === sel.key}">${esc(w.label)}<span>${w.from === w.to ? shortDate(w.from) : `${shortDate(w.from)}–${shortDate(w.to)}`}</span></button>`).join('')}</div>`;
-  const body = groups.map(([g, ms]) => `<div class="kgroup"><div class="kgroup-label">${esc(g)}</div><div class="kgrid">${ms.map((m) => `<div class="kcell"><div class="klabel">${esc(m.label)}${m.note ? ` <span class="muted">· ${esc(m.note)}</span>` : ''}</div><div class="kval">${m.v}</div><div class="ksub small">${m.sub}</div>${spark(m.sp)}</div>`).join('')}</div></div>`).join('');
-  const notes = `<p class="small muted" style="margin:0;line-height:1.6">Predicted RTO: 1 − delivered ÷ non-cancelled on Khoj orders placed ${shortDate(PR?.from)}–${shortDate(PR?.to)}, COD and online separately, weighted by each window's online share. CM %: the P&amp;L at that RTO. Breakeven: yesterday's P&amp;L at the predicted RTO, ex-GST. Repeat: a customer's Khoj order more than ${d.settings.sessionMinutes} minutes after their first${O.newRepeat?.source === 'history' ? ` (from the daily order-history pull, so up to ${shortDate(O.newRepeat.asOf)}; connect the Khoj orders question for today)` : ''}. Sparklines: last 14 days.</p>`;
+  const body = groups.map(([g, ms]) => `<div class="kgroup"><div class="kgroup-label">${esc(g)}</div><div class="kgrid${ms.length === 5 ? ' kgrid-5' : ''}">${ms.map((m) => `<div class="kcell"><div class="klabel">${esc(m.label)}${m.note ? ` <span class="muted">· ${esc(m.note)}</span>` : ''}</div><div class="kval">${m.v}</div><div class="ksub small">${m.sub}</div>${spark(m.sp)}</div>`).join('')}</div></div>`).join('');
+  const notes = `<p class="small muted" style="margin:0;line-height:1.6">Predicted RTO: on Khoj orders placed ${shortDate(PR?.from)}–${shortDate(PR?.to)}, leaving out cancelled and cancellation-initiated orders (enqueued, invalid and initiated never count), RTO = 1 − delivered ÷ the rest. COD from Khoj's own orders; online ${PR?.online.fromSellers ? `taken as the base sellers' online RTO on the same products (Khoj's own: ${pc(PR.online.actualRtoPct, 1)})` : 'from Khoj\'s own orders until the order-quality question loads'}; weighted by each window's online share. CM %: the P&amp;L at that RTO. Breakeven: yesterday's P&amp;L at the predicted RTO, ex-GST. Repeat: a customer's Khoj order more than ${d.settings.sessionMinutes} minutes after their first${O.newRepeat?.source === 'history' ? ` (from the daily order-history pull, so up to ${shortDate(O.newRepeat.asOf)}; connect the Khoj orders question for today)` : ''}. Sparklines: last 14 days.</p>`;
   const top = `<section class="card" aria-label="Snapshot"><div class="card-head"><div><h2>Snapshot</h2></div>${toggle}</div>${body}${notes}</section>`;
 
   const R = O.rolling;
@@ -1072,7 +1074,7 @@ function viewEarly(d) {
     ${cell('Return requests per delivered order', L?.returns?.khoj, L?.returns?.parent, p1, 'down', L?.returns ? `${int(L.returns.khojN)} Khoj deliveries · ${int(L.returns.products)} products` : 'Q16859')}
     ${cell('Orders using a bumper coupon', L?.bumper?.khoj, L?.bumper?.parent, p1, 'up', L?.bumper ? `${int(L.bumper.khojN)} Khoj orders` : 'Q16830')}
     ${cell('Visited again within 7 days of delivery', RV?.khoj7, RV?.base7, p1, 'up', RV ? `${int(RV.khojN)} Khoj customers delivered` : 'needs MB_Q_REVISIT', RV?.khoj14 !== null && RV ? `14 days: ${pc(RV.khoj14, 1)} vs ${pc(RV.base14, 1)}` : '')}
-    ${cell('Ordered again within 7 days', w7?.eligible ? w7.pct : null, RB?.rates?.d7, p1, 'up', w7?.eligible ? `${int(w7.eligible)} Khoj buyers` : 'order history')}
+    ${cell('Repeat order within 7 days of order placement', w7?.eligible ? w7.pct : null, RB?.rates?.d7, p1, 'up', w7?.eligible ? `${int(w7.eligible)} Khoj buyers` : 'order history')}
   </div>`;
   const disc = L?.rating?.aovDiscount ?? L?.returns?.aovDiscount;
   const head = `<section class="card" aria-label="Early signs"><div class="card-head"><div><h2>Early signs on repeats &amp; likability</h2><span class="muted small">Khoj vs the parent sellers' own sites on comparable products, weighted by Khoj orders · orders since 1 Oct</span></div></div>${tiles}
@@ -1139,15 +1141,18 @@ function viewPmfSummary(d) {
     LK?.returns && { l: 'returns', ok: LK.returns.khoj <= LK.returns.parent, txt: `return requests ${pc(LK.returns.khoj, 1)} vs ${pc(LK.returns.parent, 1)}` },
     LK?.bumper && { l: 'bumper', ok: LK.bumper.khoj >= LK.bumper.parent, txt: `bumper coupon use ${pc(LK.bumper.khoj, 1)} vs ${pc(LK.bumper.parent, 1)}` },
     RV && RV.khoj7 !== null && RV.base7 !== null && { l: 'visit', ok: RV.khoj7 >= RV.base7, txt: `visit within 7 days of delivery ${pc(RV.khoj7, 1)} vs ${pc(RV.base7, 1)}` },
-    w7?.eligible && b7 !== null && b7 !== undefined && { l: 'r7', ok: w7.pct >= b7, txt: `back within 7 days ${pc(w7.pct, 1)} vs ${pc(b7, 1)}` }
+    w7?.eligible && b7 !== null && b7 !== undefined && { l: 'r7', ok: w7.pct >= b7, txt: `repeat within 7 days of order ${pc(w7.pct, 1)} vs ${pc(b7, 1)}` }
   ].filter(Boolean);
   const eWins = early.filter((x) => x.ok).length;
   const eS2 = !early.length ? 'data' : eWins === early.length ? 'yes' : eWins ? 'partly' : 'no';
   const earlyEv = early.length ? `Khoj vs parent sellers (Khoj-order weighted): ${early.map((x) => `<span class="${x.ok ? 'good' : 'bad'}">${esc(x.txt)}</span>`).join(' · ')}.${RV ? '' : ' Visits after delivery need sql/revisit_after_delivery.sql (MB_Q_REVISIT).'}` : 'Waiting for the rating, returns and bumper-coupon questions.';
-  const repEv = (w, b, days) => (!w?.eligible ? `Not enough buyers ${days}+ days past their first order yet.` : b === null || b === undefined ? `Back within ${days} days: <strong>${pc(w.pct, 1)}</strong> Khoj. The parent-seller benchmark (Q16725) hasn't loaded yet.` : `Back within ${days} days: ${vs(w.pct, b)} parent sellers (order-weighted), on ${int(w.eligible)} buyers old enough to count.${w.eligible < 100 ? ' Under 100 buyers, so early.' : ''}`);
+  const repEv = (w, b, days) => (!w?.eligible ? `Not enough buyers ${days}+ days past their first order yet.` : b === null || b === undefined ? `Repeat within ${days} days of order placement: <strong>${pc(w.pct, 1)}</strong> Khoj. The parent-seller benchmark (Q16725) hasn't loaded yet.` : `Repeat within ${days} days of order placement: ${vs(w.pct, b)} parent sellers (order-weighted), on ${int(w.eligible)} buyers old enough to count.${w.eligible < 100 ? ' Under 100 buyers, so early.' : ''}`);
   const cat = d.catalog?.summary ? d.catalog.summary.reduce((a, x) => ({ hits: a.hits + x.hits, readable: a.readable + x.readable }), { hits: 0, readable: 0 }) : null;
   const catHit = cat && cat.readable ? (cat.hits / cat.readable) * 100 : null;
-  const conv = MM.ordersPerSession, pps = MM.productsPerSession;
+  // Conversion: orders per 100 sessions, Khoj vs parent sellers' sites (seller-level, order-weighted); browsing depth
+  // from the product-matched comparison.
+  const SM = d.sessions?.metrics ? Object.fromEntries(d.sessions.metrics.map((m) => [m.key, m])) : {};
+  const conv = SM.ordersPerSession, pps = MM.productsPerSession || SM.productsPerSession;
   const cS = !conv || conv.khoj === null || !conv.bench ? 'data' : conv.khoj >= conv.bench && pps?.khoj >= pps?.bench ? 'yes' : conv.khoj >= conv.bench || pps?.khoj >= pps?.bench ? 'partly' : 'no';
   const dS = anyPred ? (anyPred.d30 >= 25 ? 'potential' : 'partly') : 'data';
 
@@ -1161,7 +1166,7 @@ function viewPmfSummary(d) {
     row(eS2, 'Better repeat rate: early indicators', earlyEv, 'early'),
     row(rS, 'Better repeat rate: actual repeats', repEv(w14, b14, 14), 'repeat'),
     row(cS, 'Better website conversion from more cross-selling',
-      conv ? `Orders per 100 sessions ${vs(conv.khoj, conv.bench, '', 2)} the same first products on seller sites · products viewed per session ${vs(pps?.khoj, pps?.bench, '', 2)}.${B?.otherPct !== undefined ? ` ${pc(B.otherPct, 1)} of buy-now clicks are on a different product than the one landed on.` : ''}` : 'Needs the site sessions question (Q16724).', 'cross'),
+      conv ? `Orders per 100 sessions ${vs(conv.khoj, conv.bench, '', 2)} parent sellers' sites (Khoj-order weighted) · products viewed per session ${vs(pps?.khoj, pps?.bench, '', 2)}${MM.productsPerSession ? ' on the same landing products' : ''}.${B?.otherPct !== undefined ? ` ${pc(B.otherPct, 1)} of buy-now clicks are on a different product than the one landed on.` : ''}` : 'The site sessions question (Q16724) hasn\'t loaded: see Rules → Data sources.', 'cross'),
     row(dS, 'ShopDeck\'s data advantage',
       anyPred ? `<strong>${pc(anyPred.d30, 1)}</strong> of Khoj orders were predictable from the buyer's ShopDeck orders and browsing in the 30 days before. ${V ? `${pc(V.linkedPct, 1)} of visitors are identifiable at landing; personalising them could take conversion from ${pc(V.conversionPct, 2)} to ~${pc(V.estimate?.conservative?.newConversionPct, 2)}.` : ''} Not used on the site yet.` : 'Needs the browsing and personalisation questions.', 'data')
   ];

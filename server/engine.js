@@ -857,9 +857,9 @@ export function compute(src, s, history, today = todayIST()) {
   const weights = khojOrderWeights(src.history?.rows || [], s.khojSellerId, idx);
   const sessions = src.events?.rows?.length ? analyseEvents(src.events.rows, { khojSellerId: s.khojSellerId, weights, idx, khojToSellerProduct, sellerProductCat, historyRows: src.history?.rows || [] }) : null;
   // ---------- Overall Status and Scaling Plan ----------
-  const overview = src.daywise?.rows?.length ? computeOverview({ daywiseRows: src.daywise.rows, pnlRows: [...(src.pnl?.rows || []), ...(src.pnlWeeks?.rows || [])], historyRows: src.history?.rows || [], orderRows: src.khojOrders?.rows || [], khojSellerId: s.khojSellerId, sessionMinutes: s.sessionMinutes, rtoWindow: { from: day(s.predRtoFrom), to: day(s.predRtoTo) }, today }) : null;
-  const scaling = computePlan({ plan: src.plan, daywiseRows: src.daywise?.rows || [], adsRows: src.ads?.rows || [], trials: trialRows, settings: s, today });
   const productQuality = src.prodQuality?.rows?.length ? analyseProductQuality(src.prodQuality.rows) : null;
+  const overview = src.daywise?.rows?.length ? computeOverview({ daywiseRows: src.daywise.rows, pnlRows: [...(src.pnl?.rows || []), ...(src.pnlWeeks?.rows || [])], historyRows: src.history?.rows || [], orderRows: src.khojOrders?.rows || [], khojSellerId: s.khojSellerId, sessionMinutes: s.sessionMinutes, rtoWindow: { from: day(s.predRtoFrom), to: day(s.predRtoTo) }, onlineRtoOverride: productQuality?.onlineRto?.seller ?? null, today }) : null;
+  const scaling = computePlan({ plan: src.plan, daywiseRows: src.daywise?.rows || [], adsRows: src.ads?.rows || [], trials: trialRows, settings: s, today });
   const likability = analyseLikability({ rating: src.rating?.rows, returns: src.returns?.rows, bumper: src.bumper?.rows });
   const revisit = src.revisit?.rows?.length ? analyseRevisit(src.revisit.rows, { khojSellerId: s.khojSellerId, weights }) : null;
   // Seller-side Spend/GMV for the products Khoj sells: the universe question's L30D S/GMV per seller product, weighted
