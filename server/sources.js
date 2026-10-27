@@ -16,7 +16,7 @@ const SOURCES = {
   pnl: { env: 'MB_Q_PNL', file: 'pnl.csv', label: 'Khoj P&L: today, yesterday, L3D, L7D', everyHours: 2 },
   pnlWeeks: { env: 'MB_Q_PNL', file: 'pnl_weeks.csv', label: 'Khoj P&L: weeks since launch', everyHours: 24 },
   // Khoj's own orders since launch (sql/khoj_orders.sql): new vs repeat orders by day. Small; every hour.
-  khojOrders: { env: 'MB_Q_KHOJ_ORDERS', file: 'khoj_orders.csv', label: 'Khoj orders (new vs repeat)', everyHours: 1 },
+  khojOrders: { env: 'MB_Q_KHOJ_ORDERS', id: '17017', file: 'khoj_orders.csv', label: 'Khoj orders (new vs repeat)', everyHours: 1 },
   // Early signs of likability, Khoj vs parent sellers on comparable products, weighted by Khoj orders (the questions
   // compute the weighting themselves and return an "ALL" row).
   rating: { env: 'MB_Q_RATING', id: '16826', file: 'rating.csv', label: 'User rating: Khoj vs parent (comparable products)', everyHours: 24 },
