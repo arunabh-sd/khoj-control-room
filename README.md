@@ -31,9 +31,9 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_EVENTS` | `16724` (site sessions, `sql/site_sessions.sql`) |
 | `MB_Q_BENCHMARK` | `16725` (repeat benchmark, `sql/repeat_benchmark.sql`) |
 | `MB_Q_KHOJ_ORDERS` | default 17017: Khoj orders since launch, for new vs repeat orders (`sql/khoj_orders.sql`), pulled hourly; until set, the daily order history is used |
-| `MB_Q_REVISIT` | default 17003: visits after delivery, Khoj vs parent sellers (`sql/revisit_after_delivery.sql`, variable `parent_sellers`, Text) |
+| `MB_Q_REVISIT` | visits after delivery, Khoj vs parent sellers (`sql/revisit_after_delivery.sql`, variable `parent_sellers`, Text) |
 | `MB_Q_RATING` / `MB_Q_RETURNS` / `MB_Q_BUMPER` | default to 16826 / 16859 / 16830 (rating, return requests, bumper coupon: Khoj vs parent) |
-| `MB_Q_PRODUCT_QUALITY` | order quality, Khoj vs the same products on their seller sites (`sql/product_quality.sql`, variable `khoj_products`, Text) |
+| `MB_Q_PRODUCT_QUALITY` | default 17003: order quality, Khoj vs the same products on their seller sites (`sql/product_quality.sql`, variable `khoj_products`, Text) |
 | `MB_Q_BROWSING` | Khoj buyers' browsing on ShopDeck sites (`sql/khoj_buyer_browsing.sql`) |
 | `MB_Q_PERSONALISE` | Khoj visitors' personalisation potential (`sql/visitor_personalisation.sql`) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
