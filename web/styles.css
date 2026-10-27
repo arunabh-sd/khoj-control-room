@@ -205,3 +205,6 @@ tr.cust summary { cursor: pointer; }
 .formula .op { font-size: 20px; color: var(--muted); }
 .formula .term.result { background: var(--blue-bg); border-color: var(--blue-bg); }
 @media (max-width: 760px) { .thesis-row { grid-template-columns: 1fr; gap: 6px; } .plan-hero .big { font-size: 32px; } }
+.status-table td, .status-table th { padding: 10px 14px; }
+.status-table td.num { font-size: 15px; }
+.status-table th.r { min-width: 110px; }

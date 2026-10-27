@@ -175,7 +175,8 @@ export function analyseHistory(rows, ctx) {
   const segRow = (key, cs) => {
     const lines = cs.flatMap((cu) => cu.all.filter((x) => x.s === K));
     const r = closedRates(lines);
-    return { key, buyers: cs.length, share: pct(cs.length, N), codPct: r.codPct, rtoPct: r.rtoPct, closed: r.closed, cancelPct: r.cancelPct, aov: r.aov, repeatPct: pct(cs.filter(repeatOf).length, cs.length) };
+    const rep = (w) => { const el = cs.filter((cu) => end - cu.fk >= w * DAY); return { eligible: el.length, pct: el.length ? pct(el.filter((cu) => cu.khoj.some((x) => x.t - cu.fk > gap && x.t - cu.fk <= w * DAY)).length, el.length) : null }; };
+    return { key, buyers: cs.length, share: pct(cs.length, N), codPct: r.codPct, rtoPct: r.rtoPct, closed: r.closed, cancelPct: r.cancelPct, aov: r.aov, repeatPct: pct(cs.filter(repeatOf).length, cs.length), rep7: rep(7), rep14: rep(14) };
   };
   const groupBy = (cs, keyOf, order) => {
     const m = new Map();

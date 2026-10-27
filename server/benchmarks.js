@@ -464,3 +464,37 @@ export function analyseVisitorPersonalisation(rows) {
     estimate: { conservative: est(L['same category'].conversionPct), optimistic: est(matchedAll.conversionPct), personalisableSessions: L['no match'].sessions, personalisablePct: L['no match'].share }
   };
 }
+
+// Order quality, Khoj vs the same products on their own seller sites (sql/product_quality.sql). Seller-site rates are
+// per product, weighted by Khoj's orders of that product, so the comparison is like for like on product mix.
+export function analyseProductQuality(rows, { minSellerOrders = 5 } = {}) {
+  const n = (v) => Number(v) || 0;
+  const P = new Map();   // parent product → { cat, khoj: {l15, rto}, seller: {l15, rto} } with COD/Online counts
+  const blank = () => ({ COD: { orders: 0, cancelled: 0, nonCancelled: 0, delivered: 0 }, Online: { orders: 0, cancelled: 0, nonCancelled: 0, delivered: 0 } });
+  for (const r of rows || []) {
+    const side = String(r.side), w = String(r.window_key || r.win || ''), pid = String(r.parent_product || '');
+    if (!pid || !['khoj', 'seller'].includes(side) || !['l15', 'rto'].includes(w)) continue;
+    const p = P.get(pid) || P.set(pid, { cat: r.cat || null, khoj: { l15: blank(), rto: blank() }, seller: { l15: blank(), rto: blank() } }).get(pid);
+    const b = p[side][w][String(r.pay) === 'COD' ? 'COD' : 'Online'];
+    b.orders += n(r.orders); b.cancelled += n(r.cancelled); b.nonCancelled += n(r.non_cancelled); b.delivered += n(r.delivered);
+  }
+  if (!P.size) return null;
+  const sum = (g, pays = ['COD', 'Online']) => pays.reduce((a, k) => ({ orders: a.orders + g[k].orders, cancelled: a.cancelled + g[k].cancelled, nonCancelled: a.nonCancelled + g[k].nonCancelled, delivered: a.delivered + g[k].delivered }), { orders: 0, cancelled: 0, nonCancelled: 0, delivered: 0 });
+  const metric = (win, f, weightOf, minOf) => {
+    let kNum = 0, kDen = 0, sW = 0, sV = 0, wAll = 0;
+    for (const p of P.values()) {
+      const k = f(p.khoj[win]), s = f(p.seller[win]), w = weightOf(p.khoj[win]);
+      if (k.den) { kNum += k.num; kDen += k.den; }
+      if (!w) continue;
+      wAll += w;
+      if (s.den >= minOf && s.den) { sV += w * (s.num / s.den); sW += w; }
+    }
+    return { khoj: kDen ? (kNum / kDen) * 100 : null, seller: sW ? (sV / sW) * 100 : null, coverage: wAll ? (sW / wAll) * 100 : null, khojBase: kDen };
+  };
+  const online = metric('l15', (g) => ({ num: g.Online.orders, den: g.Online.orders + g.COD.orders }), (g) => sum(g).orders, minSellerOrders);
+  const cancel = metric('l15', (g) => { const a = sum(g); return { num: a.cancelled, den: a.orders }; }, (g) => sum(g).orders, minSellerOrders);
+  const rto = metric('rto', (g) => { const a = sum(g); return { num: a.nonCancelled - a.delivered, den: a.nonCancelled }; }, (g) => sum(g).nonCancelled, minSellerOrders);
+  const codRto = metric('rto', (g) => ({ num: g.COD.nonCancelled - g.COD.delivered, den: g.COD.nonCancelled }), (g) => g.COD.nonCancelled, minSellerOrders);
+  const onlineRto = metric('rto', (g) => ({ num: g.Online.nonCancelled - g.Online.delivered, den: g.Online.nonCancelled }), (g) => g.Online.nonCancelled, Math.max(2, Math.round(minSellerOrders / 2)));
+  return { products: P.size, online, cancel, rto, codRto, onlineRto };
+}

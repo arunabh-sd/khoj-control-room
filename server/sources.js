@@ -11,8 +11,10 @@ const SOURCES = {
   // Overall Status: Khoj day-wise orders, GMV, spend and ad funnel (Q16083). Too slow for a page load, so it's
 // pre-pulled every hour by the scheduled job.
   daywise: { env: 'MB_Q_DAYWISE', file: 'daywise.csv', label: 'Khoj day-wise (orders, GMV, spend)', everyHours: 1 },
-  // P&L (Q16167) for several date windows (weeks since launch, last 7 days, yesterday, since launch), once a day.
-  pnl: { env: 'MB_Q_PNL', file: 'pnl.csv', label: 'Khoj P&L by window', everyHours: 24 },
+  // P&L (Q16167), run once per date window at that window's predicted RTO: today, yesterday, L3D, L7D and the 7
+  // days before, every 2 hours; each week since launch and since launch, once a day.
+  pnl: { env: 'MB_Q_PNL', file: 'pnl.csv', label: 'Khoj P&L: today, yesterday, L3D, L7D', everyHours: 2 },
+  pnlWeeks: { env: 'MB_Q_PNL', file: 'pnl_weeks.csv', label: 'Khoj P&L: weeks since launch', everyHours: 24 },
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products', everyHours: 6 },
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
   catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
@@ -24,6 +26,7 @@ const SOURCES = {
   // so they run after products and order history, at half past the hour.
   events: { env: 'MB_Q_EVENTS', file: 'events.csv', label: 'Site sessions: Khoj vs parent sellers', everyHours: 24, phase: 2 },
   personalise: { env: 'MB_Q_PERSONALISE', file: 'personalise.csv', label: 'Khoj visitors: personalisation potential', everyHours: 24, phase: 2 },
+  prodQuality: { env: 'MB_Q_PRODUCT_QUALITY', file: 'prod_quality.csv', label: 'Order quality: Khoj vs the same products on seller sites', everyHours: 24, phase: 2 },
   benchmark: { env: 'MB_Q_BENCHMARK', file: 'benchmark.csv', label: 'Repeat benchmark: parent sellers', everyHours: 24, phase: 2 },
   // Phase 3: the heaviest question gets its own scheduled function, so if it runs out of time it can't take the
   // others down with it.
@@ -61,7 +64,7 @@ export async function loadOne(name, { timeoutMs, params, paramSets } = {}) {
     let rows;
     if (paramSets?.length) {
       // One question, several parameter sets (e.g. P&L per date window): run them together, tag each row.
-      const parts = await Promise.all(paramSets.map(async (ps) => (await runCard(id, '', { timeoutMs, params: ps.params })).map((r) => ({ ...r, window: ps.label, window_start: ps.params.start_date, window_end: ps.params.end_date }))));
+      const parts = await Promise.all(paramSets.map(async (ps) => (await runCard(id, '', { timeoutMs, params: ps.params })).map((r) => ({ ...r, window: ps.label, window_start: ps.params.start_date, window_end: ps.params.end_date, window_rto: ps.params.rto_pct }))));
       rows = parts.flat();
     } else rows = await runCard(id, src.params ? process.env[src.params] : '', { timeoutMs, params });
     const rawRows = rows.length;

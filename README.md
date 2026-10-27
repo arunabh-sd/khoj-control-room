@@ -30,6 +30,7 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_CUSTOMER_HISTORY` | `16717` (Khoj buyers' ShopDeck order history, 12 months) |
 | `MB_Q_EVENTS` | `16724` (site sessions, `sql/site_sessions.sql`) |
 | `MB_Q_BENCHMARK` | `16725` (repeat benchmark, `sql/repeat_benchmark.sql`) |
+| `MB_Q_PRODUCT_QUALITY` | order quality, Khoj vs the same products on their seller sites (`sql/product_quality.sql`, variable `khoj_products`, Text) |
 | `MB_Q_BROWSING` | Khoj buyers' browsing on ShopDeck sites (`sql/khoj_buyer_browsing.sql`) |
 | `MB_Q_PERSONALISE` | Khoj visitors' personalisation potential (`sql/visitor_personalisation.sql`) |
 | `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |

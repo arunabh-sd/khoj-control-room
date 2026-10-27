@@ -9,7 +9,7 @@ import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES, EVERY_HOURS, PHASE
 import { khojOrderWeights, parentSellerList } from './benchmarks.js';
 import { buildProductIndex } from './engine.js';
 import { compute, todayIST, day } from './engine.js';
-import { addDaysIST, mondayOf } from './overview.js';
+import { addDaysIST, mondayOf, parseDaywise, aggDays, predictRto, rtoForMix } from './overview.js';
 import { normalisePlan } from './plan.js';
 import { DEFAULT_SETTINGS, SETTING_LABELS, mergeSettings } from './rules.js';
 
@@ -72,7 +72,7 @@ export function createApi(store) {
     const settings = mergeSettings(await store.getSettings());
     const [history, products] = [await getSource('history'), await getSource('products')];
     const idx = buildProductIndex(products.rows || [], settings);
-    if (name === 'personalise') {
+    if (name === 'personalise' || name === 'prodQuality') {
       // Khoj products → parent seller, parent seller product, test category. Live products plus anything Khoj has
       // sold or had sessions on.
       const universe = await getSource('universe');
@@ -89,27 +89,39 @@ export function createApi(store) {
     return { parent_sellers: parentSellerList(khojOrderWeights(history.rows || [], settings.khojSellerId, idx)).join(',') };
   }
 
-  // P&L windows: each week (Mon–Sun) since launch, the last 7 days, yesterday, and since launch, all up to yesterday.
-  async function pnlParamSets() {
+  // P&L windows, each run at its own predicted RTO (D-17 to D-10 COD and online RTO, weighted by the window's
+  // payment mix from the day-wise question). `pnl`: today, yesterday, L3D, L7D, the 7 days before. `pnlWeeks`: each
+  // week since launch, and since launch.
+  async function pnlParamSets(name) {
     const settings = mergeSettings(await store.getSettings());
-    const dw = await getSource('daywise');
-    const dates = (dw.rows || []).map((r) => day(r.date)).filter(Boolean).sort();
-    const yest = addDaysIST(todayIST(), -1);
-    const launch = dates[0] || addDaysIST(yest, -27);
-    const rto = settings.pnlRtoPct;
+    const [dw, hist] = [await getSource('daywise'), await getSource('history')];
+    const today = todayIST(), yest = addDaysIST(today, -1);
+    const daily = parseDaywise(dw.rows || []);
+    const launch = daily[0]?.date || addDaysIST(yest, -27);
+    const pred = predictRto(hist.rows || [], settings.khojSellerId, today);
+    const rtoOf = (start, end) => {
+      const a = aggDays(daily.filter((r) => r.date >= start && r.date <= end));
+      const v = rtoForMix(pred, a.onlinePct);
+      return Math.round(v ?? settings.pnlRtoPct);
+    };
     const sets = [];
-    const mk = (label, start, end) => { if (start <= end) sets.push({ label, params: { start_date: start, end_date: end, rto_pct: rto } }); };
-    let wk = mondayOf(launch);
-    while (wk <= yest) { const end = addDaysIST(wk, 6); mk(`week:${wk}`, wk < launch ? launch : wk, end > yest ? yest : end); wk = addDaysIST(wk, 7); }
-    mk('last7', addDaysIST(yest, -6), yest);
-    mk('prev7', addDaysIST(yest, -13), addDaysIST(yest, -7));
-    mk('yesterday', yest, yest);
-    mk('all', launch, yest);
+    const mk = (label, start, end) => { if (start <= end) sets.push({ label, params: { start_date: start, end_date: end, rto_pct: rtoOf(start, end) } }); };
+    if (name === 'pnlWeeks') {
+      let wk = mondayOf(launch);
+      while (wk <= yest) { const end = addDaysIST(wk, 6); mk(`week:${wk}`, wk < launch ? launch : wk, end > yest ? yest : end); wk = addDaysIST(wk, 7); }
+      mk('all', launch, yest);
+    } else {
+      mk('today', today, today);
+      mk('yesterday', yest, yest);
+      mk('l3d', addDaysIST(yest, -2), yest);
+      mk('l7d', addDaysIST(yest, -6), yest);
+      mk('prev7', addDaysIST(yest, -13), addDaysIST(yest, -7));
+    }
     return sets;
   }
 
   async function refreshSource(name, opts = {}) {
-    if (name === 'pnl' && !opts.paramSets && !process.env.DATA_DIR) opts = { ...opts, paramSets: await pnlParamSets() };
+    if ((name === 'pnl' || name === 'pnlWeeks') && !opts.paramSets && !process.env.DATA_DIR) opts = { ...opts, paramSets: await pnlParamSets(name) };
     if (PHASE[name] === 2 && !opts.params) opts = { ...opts, params: await phase2Params(name) };
     const result = { ...(await loadOne(name, opts)), version: DATA_VERSION };
     if (result.status === 'error') {

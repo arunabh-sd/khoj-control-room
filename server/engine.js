@@ -3,7 +3,7 @@ import { TEST_CATEGORIES, categoryOf } from './categories.js';
 import { analyseHistory } from './history.js';
 import { computeOverview } from './overview.js';
 import { computePlan } from './plan.js';
-import { khojOrderWeights, analyseEvents, analyseRepeatBenchmark, analyseVisitorPersonalisation } from './benchmarks.js';
+import { khojOrderWeights, analyseEvents, analyseRepeatBenchmark, analyseVisitorPersonalisation, analyseProductQuality } from './benchmarks.js';
 
 const CATS_ALL = [...TEST_CATEGORIES, 'Other'];
 
@@ -857,13 +857,14 @@ export function compute(src, s, history, today = todayIST()) {
   const weights = khojOrderWeights(src.history?.rows || [], s.khojSellerId, idx);
   const sessions = src.events?.rows?.length ? analyseEvents(src.events.rows, { khojSellerId: s.khojSellerId, weights, idx, khojToSellerProduct, sellerProductCat, historyRows: src.history?.rows || [] }) : null;
   // ---------- Overall Status and Scaling Plan ----------
-  const overview = src.daywise?.rows?.length ? computeOverview({ daywiseRows: src.daywise.rows, pnlRows: src.pnl?.rows || [], today }) : null;
+  const overview = src.daywise?.rows?.length ? computeOverview({ daywiseRows: src.daywise.rows, pnlRows: [...(src.pnl?.rows || []), ...(src.pnlWeeks?.rows || [])], historyRows: src.history?.rows || [], khojSellerId: s.khojSellerId, today }) : null;
   const scaling = computePlan({ plan: src.plan, daywiseRows: src.daywise?.rows || [], adsRows: src.ads?.rows || [], trials: trialRows, settings: s, today });
+  const productQuality = src.prodQuality?.rows?.length ? analyseProductQuality(src.prodQuality.rows) : null;
   const visitorPersonalisation = src.personalise?.rows?.length ? analyseVisitorPersonalisation(src.personalise.rows) : null;
   const repeatBench = src.benchmark?.rows?.length ? analyseRepeatBenchmark(src.benchmark.rows, { khojSellerId: s.khojSellerId, weights }) : null;
 
   return {
-    today, catAov, notes, kpis, killReview, overlap, customers, sessions, repeatBench, visitorPersonalisation, overview, scaling,
+    today, catAov, notes, kpis, killReview, overlap, customers, sessions, repeatBench, visitorPersonalisation, productQuality, overview, scaling,
     universe: hasUniverse ? { byCat: universe, hasAll: true, hasStatus: uHasStatus, origin: src.universe.origin } : null,
     activeTrialKeys: trials.filter((t) => t.active).map((t) => t.id),
     coverage: coverageRows,

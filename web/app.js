@@ -134,7 +134,9 @@ function renderChrome() {
   const notices = [];
   if (ui.msg) notices.push(`<div class="notice notice-orange">${esc(ui.msg)}</div>`);
   if (ui.note) notices.push(`<div class="notice notice-green">${esc(ui.note)}</div>`);
-  if (d) {
+  // Data-load issues live on the Rules tab; the engine's data notes also show on Hit % & Scalability.
+  const showLoad = ui.tab === 'rules', showNotes = ui.tab === 'rules' || (ui.tab === 'pmf' && ui.sub === 'hits');
+  if (d && showLoad) {
     for (const [k, s] of Object.entries(d.meta.sources)) {
       if (s.status === 'pulling') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: first pull is running in the background (${esc(s.error)}). Refresh in a few minutes.</div>`);
       else if (s.status === 'error' && s.daily) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: not pulled yet. The scheduled pull checks every 5 minutes (last try: ${esc(s.error)}).</div>`);
@@ -144,7 +146,9 @@ function renderChrome() {
       else if (s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull') notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong>: waiting for the scheduled pull, which checks every 5 minutes.</div>`);
       else if (s.status === 'missing' && !['universe', 'overlap', 'history', 'events', 'benchmark', 'browsing', 'personalise'].includes(k)) notices.push(`<div class="notice notice-amber"><strong>${esc(k)}</strong> source not connected (${esc(s.origin)}). Sections that need it are empty.</div>`);
     }
-    for (const n of d.notes) notices.push(`<div class="notice notice-amber">${esc(n)}</div>`);
+  }
+  if (d && showNotes) for (const n of d.notes) notices.push(`<div class="notice notice-amber">${esc(n)}</div>`);
+  if (d && showLoad) {
     if (d.meta.store === 'memory') notices.push('<div class="notice notice-amber">No persistent store: task ticks and the decision log are kept in memory and reset on restart.</div>');
   }
   $('notices').innerHTML = notices.join('');
@@ -330,7 +334,7 @@ function killReviewCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', daywise: 'Khoj day-wise', pnl: 'Khoj P&L', events: 'Site sessions vs parent sellers', personalise: 'Visitor personalisation', benchmark: 'Repeat benchmark (parent sellers)' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', daywise: 'Khoj day-wise', pnl: 'Khoj P&L (today to L7D)', pnlWeeks: 'Khoj P&L (weeks)', prodQuality: 'Order quality: Khoj vs same products on seller sites', events: 'Site sessions vs parent sellers', personalise: 'Visitor personalisation', benchmark: 'Repeat benchmark (parent sellers)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.status === 'pulling' ? chip('blue', 'Pulling in the background') : s.fallback ? chip('amber', `Repo copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.rows ? `<a class="small" href="/api/sources/${esc(k)}.csv" download>Download the rows (CSV)</a>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
@@ -463,10 +467,16 @@ const card = (label, title, sub, body, right = '') => `<section class="card" ari
 const rtoTone = (x) => (x === null || x === undefined ? 'muted' : x > 30 ? 'bad' : x > 20 ? 'warn' : 'good');
 const nOf = (x) => (x && x.eligible ? `${pc(x.pct, 1)} <span class="muted small">of ${int(x.eligible)}</span>` : '<span class="muted small">not enough days yet</span>');
 const dateOfMin = (m) => (m ? new Date(m * 60000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) : '');
-const segCols = (head) => [
+// Repeat per cut: back on Khoj within 7 / 14 days (buyers old enough to count); base = parent sellers' own sites,
+// order-weighted, where the benchmark has that cut (payment, new vs returning) or overall.
+const repCell = (x) => (x && x.eligible ? `${pc(x.pct, 1)} <span class="muted small">n=${int(x.eligible)}</span>` : '<span class="muted small">—</span>');
+const segCols = (head, baseOf = () => null) => [
   { h: head, v: (r) => esc(r.key) },
   { h: 'Buyers', r: 1, v: (r) => int(r.buyers) }, { h: 'Share', r: 1, v: (r) => pc(r.share, 1) },
-  { h: 'COD', r: 1, v: (r) => pc(r.codPct) }, { h: 'RTO', r: 1, v: (r) => pc(r.rtoPct), cls: (r) => rtoTone(r.rtoPct) }
+  { h: 'COD', r: 1, v: (r) => pc(r.codPct) }, { h: 'RTO', r: 1, v: (r) => pc(r.rtoPct), cls: (r) => rtoTone(r.rtoPct) },
+  { h: 'Repeat 7d', r: 1, v: (r) => repCell(r.rep7) },
+  { h: 'Repeat 14d', r: 1, v: (r) => repCell(r.rep14), cls: (r) => { const b = baseOf(r); return b === null || b === undefined || !r.rep14?.eligible ? '' : r.rep14.pct >= b ? 'good' : 'bad'; } },
+  { h: 'Base sellers 14d', r: 1, v: (r) => { const b = baseOf(r); return b === null || b === undefined ? '<span class="muted small">—</span>' : pc(b, 1); } }
 ];
 
 const DATA_EVENTS = ['Site sessions (MB_Q_EVENTS)', 'the site events question in the README: Khoj and its parent sellers, last 28 days'];
@@ -491,19 +501,21 @@ function viewAudience(d, mode = 'quality') {
   if (!cu || cu.error || !cu.audience) return mode === 'data' ? historyMissing('Personalisation potential') + visitorPersonalisationCard(d) : historyMissing('Customer quality') + (d.overlap ? overlapCard(d) : overlapMissing) + later;
   const a = cu.audience, pr = a.predict, pa = a.parent, cmp = a.compare;
   const recent7 = a.byRecency.find((x) => x.key === 'Within 7 days');
+  const RB14 = d.repeatBench?.rates?.d14 ?? null, RBs = d.repeatBench?.segments || null;
   const who = card('Who buys on Khoj', 'Who buys on Khoj', historySub(d), kpiRow([
     ['New to ShopDeck', pc(a.newToSdPct, 1), 'ShopDeck marks their Khoj order as their first ever ShopDeck order (all time, not just 12 months)'],
     ['No ShopDeck order in the 12 months before', pc(a.noPriorPct, 1), 'new or lapsed when they found Khoj'],
     ['Power users', pc(a.powerPct, 1), '4+ ShopDeck orders in the 12 months before their first Khoj order'],
     ['Bought on ShopDeck in the 7 days before', pc(recent7?.share, 1), 'active shoppers when Khoj reached them'],
     ['Already a customer of the parent seller', pc(pa.beforePct, 1), 'bought from the seller whose product they bought on Khoj']
-  ]) + `<div class="grid-2">
-      ${tbl(segCols('ShopDeck history'), a.byUserType)}
-      ${tbl(segCols('Last ShopDeck order before Khoj'), a.byRecency)}
-      ${tbl(segCols('First Khoj category'), a.byCategory)}
-      ${tbl(segCols('Payment, first Khoj order'), a.byPayment)}
+  ]) + `<div style="display:flex;flex-direction:column;gap:14px">
+      ${tbl(segCols('ShopDeck history', (r) => RBs?.[r.key === 'New to ShopDeck' ? 'New to ShopDeck' : 'Returning to ShopDeck'] ?? RB14), a.byUserType, { min: 760 })}
+      ${tbl(segCols('Last ShopDeck order before Khoj', () => RB14), a.byRecency, { min: 760 })}
+      ${tbl(segCols('First Khoj category', () => RB14), a.byCategory, { min: 760 })}
+      ${tbl(segCols('Payment, first Khoj order', (r) => RBs?.[r.key] ?? RB14), a.byPayment, { min: 760 })}
     </div>
-    <details><summary class="small">By state (from pincode)</summary><div style="margin-top:8px">${tbl(segCols('State'), a.byState)}</div></details>`);
+    <p class="small muted">Repeat: another Khoj order within 7 / 14 days of the first (more than ${d.settings.sessionMinutes} minutes later), among buyers whose first order is at least that old. Base sellers: the parent sellers' own sites, weighted by Khoj orders (Q16725)${RB14 === null ? ', not loaded yet' : `; overall ${pc(RB14, 1)} at 14 days, with a split for payment and new vs returning`}.</p>
+    <details><summary class="small">By state (from pincode)</summary><div style="margin-top:8px">${tbl(segCols('State', () => RB14), a.byState, { min: 760 })}</div></details>`);
   const P = a.personalisation;
   const lvl = P ? P.levels : [];
   const predict = !P ? '' : card('Personalisation potential', 'Could we have predicted the order? Personalisation potential · buyers', `Share of ${int(P.orders)} Khoj orders that the customer's earlier signals pointed to, by how specific the signal was and how recent. Earlier orders on any ShopDeck site (and earlier Khoj visits) count; browsing comes next.`, kpiRow([
@@ -777,17 +789,20 @@ function viewCross(d) {
 }
 
 // ---------- Charts (inline SVG, no library) ----------
-function chartSvg({ labels, bars = null, lines = [], refLine = null, height = 180, yFmt = (v) => v, barColor = 'var(--blue)', barColors = null, barOpacity = 0.28, barLabel = '', yCap = null }) {
+function chartSvg({ labels, bars = null, lines = [], refLine = null, height = 180, yFmt = (v) => v, barColor = 'var(--blue)', barColors = null, barOpacity = 0.28, barLabel = '', yCap = null, log = false }) {
   const W = 760, H = height, pl = 44, pr = 12, pt = 12, pb = 26;
   const n = labels.length; if (!n) return '';
-  const vals = [...(bars || []), ...lines.flatMap((l) => l.values), ...(refLine ? [refLine.value] : [])].filter((v) => v !== null && Number.isFinite(v));
-  const max = Math.min(Math.max(...vals, 0), yCap ?? Infinity) * 1.12 || 1;
-  const clip = (v) => (v === null ? null : Math.min(v, max));
-  const x = (i) => pl + ((W - pl - pr) * (i + 0.5)) / n, y = (v) => pt + (H - pt - pb) * (1 - Math.min(v, max) / max);
+  const raw = [...(bars || []), ...lines.flatMap((l) => l.values), ...(refLine ? [refLine.value] : [])].filter((v) => v !== null && Number.isFinite(v));
+  // Log scale (for plans that grow 100×): values map through log10 from a floor just under the smallest one.
+  const lo = log ? 10 ** Math.floor(Math.log10(Math.max(1, Math.min(...raw.filter((v) => v > 0), 1e12)))) : 0;
+  const tf = log ? (v) => Math.log10(Math.max(v, lo)) - Math.log10(lo) : (v) => v;
+  const max = (log ? tf(Math.max(...raw, lo * 10)) : Math.min(Math.max(...raw, 0), yCap ?? Infinity)) * 1.12 || 1;
+  const x = (i) => pl + ((W - pl - pr) * (i + 0.5)) / n, y = (v) => pt + (H - pt - pb) * (1 - Math.min(tf(v), max) / max);
   const bw = Math.max(2, ((W - pl - pr) / n) * 0.62);
-  const ticks = [0, 0.5, 1].map((f) => max * f / 1.12);
+  const ticks = log ? Array.from({ length: Math.floor(max / 1.12) + 1 }, (_, i) => lo * 10 ** i) : [0, 0.5, 1].map((f) => max * f / 1.12);
   const grid = ticks.map((v) => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${pl - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${esc(yFmt(v))}</text>`).join('');
-  const barsSvg = bars ? bars.map((v, i) => v === null ? '' : `<rect x="${x(i) - bw / 2}" y="${y(v)}" width="${bw}" height="${Math.max(0, H - pb - y(v))}" rx="2" fill="${barColors?.[i] || barColor}" opacity="${barOpacity}"><title>${esc(labels[i])}: ${esc(yFmt(v))} ${esc(barLabel)}</title></rect>`).join('') : '';
+  const base = H - pb;
+  const barsSvg = bars ? bars.map((v, i) => v === null ? '' : `<rect x="${x(i) - bw / 2}" y="${y(v)}" width="${bw}" height="${Math.max(0, base - y(v))}" rx="2" fill="${barColors?.[i] || barColor}" opacity="${barOpacity}"><title>${esc(labels[i])}: ${esc(yFmt(v))} ${esc(barLabel)}</title></rect>`).join('') : '';
   const linesSvg = lines.map((l) => {
     const pts = l.values.map((v, i) => (v === null || !Number.isFinite(v) ? null : `${x(i)},${y(v)}`)).filter(Boolean);
     return `<polyline points="${pts.join(' ')}" fill="none" stroke="${l.color}" stroke-width="${l.width || 2}" ${l.dash ? 'stroke-dasharray="4 3"' : ''} stroke-linejoin="round"/>` + (l.dots ? l.values.map((v, i) => (v === null ? '' : `<circle cx="${x(i)}" cy="${y(v)}" r="2.5" fill="${l.color}" opacity=".55"><title>${esc(labels[i])}: ${esc(yFmt(v))}</title></circle>`)).join('') : '');
@@ -804,85 +819,61 @@ const delta = (a, b, { pts = false, inverse = false, d = 0 } = {}) => {
   const good = inverse ? v < 0 : v > 0;
   return `<span class="${Math.abs(v) < 0.05 ? 'muted' : good ? 'good' : 'bad'}">${v >= 0 ? '+' : ''}${v.toFixed(pts ? 1 : d)}${pts ? ' pts' : '%'}</span>`;
 };
+const addDays = (iso, n) => { const x = new Date(iso + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const shortDate = (iso) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '');
 
 // ---------- Overall Status ----------
 function viewStatus(d) {
   const O = d.overview;
-  if (!O) return card('Overall Status', 'Overall Status', '', '<p class="small muted">Connect the day-wise question: set <code>MB_Q_DAYWISE</code> = 16083 (and <code>MB_Q_PNL</code> = 16167 for the P&amp;L) on Netlify.</p>', chip('amber', 'Not connected'));
-  const L = O.last7, P = O.prev7, PL = O.pnl.last7, PP = O.pnl.prev7;
-  const toneCls = { bad: 'notice-orange', good: 'notice-green', info: 'notice-amber' };
-  const pnlLabel = PL ? (PL.window === 'last7' ? 'last 7 days' : `${shortDate(PL.start)}${PL.end !== PL.start ? '–' + shortDate(PL.end) : ''}`) : '';
-  const head = card('Where we are', 'Where we are', `Last 7 days (${shortDate(L.from)}–${shortDate(L.to)}) vs the 7 before · today so far: ${O.todayRow ? `${int(O.todayRow.orders)} orders, ${inr(O.todayRow.gmv)} GMV` : '—'}`,
-    `<p style="margin:0;font-size:15px;line-height:1.55">${esc(O.verdict)}</p>` + kpiRow([
-      ['Orders / day', int(L.ordersPerDay), ''], ['GMV / day', inr(L.gmvPerDay), ''], ['Spend / day', inr(L.spendPerDay), ''],
-      ['Spend / GMV', pc(L.sgmv, 1), O.breakevenAdSgmv ? `breakeven ~${pc(O.breakevenAdSgmv, 1)}` : ''], ['AOV', inr(L.aov), ''],
-      ['Online orders', pc(L.onlinePct, 1), ''], ['Cancelled', pc(L.cancelPct, 1), ''],
-      ['RTO', PL ? pc(PL.rtoPct, 1) : '—', PL ? `P&L, ${pnlLabel}` : 'connect MB_Q_PNL'], ['Profit (of NMV)', PL ? pc(PL.profitPct, 1) : '—', PL ? `${inr(PL.perOrder?.profit)} per shipped order` : '']
-    ]) +
-    `<div class="small" style="display:flex;gap:16px;flex-wrap:wrap">Week on week: orders/day ${delta(L.ordersPerDay, P.ordersPerDay)} · GMV/day ${delta(L.gmvPerDay, P.gmvPerDay)} · spend/day ${delta(L.spendPerDay, P.spendPerDay)} · Spend/GMV ${delta(L.sgmv, P.sgmv, { pts: true, inverse: true })} · AOV ${delta(L.aov, P.aov)} · online ${delta(L.onlinePct, P.onlinePct, { pts: true })} · cancelled ${delta(L.cancelPct, P.cancelPct, { pts: true, inverse: true })}${PL && PP ? ` · RTO ${delta(PL.rtoPct, PP.rtoPct, { pts: true, inverse: true })} · profit ${delta(PL.profitPct, PP.profitPct, { pts: true })}` : ''}</div>` +
-    (O.flags.length ? `<div style="display:flex;flex-direction:column;gap:8px">${O.flags.map((f) => `<div class="notice ${toneCls[f.tone]}">${esc(f.text)}</div>`).join('')}</div>` : ''));
+  if (!O) return card('Overall Status', 'Overall Status', '', '<p class="small muted">Waiting for the day-wise question (Q16083). It is pulled every hour in the background.</p>', chip('amber', 'No data yet'));
+  const Wn = O.windows, BE = O.breakevenAdSgmv, PR = O.predictedRto;
+  const sg = (v) => (BE === null || v === null || v === undefined ? '' : v <= BE ? 'good' : v <= BE + 3 ? 'warn' : 'bad');
+  const rowsDef = [
+    ['Orders / day', (w) => int(w.ordersPerDay)],
+    ['Cancelled %', (w) => pc(w.cancelPct, 1)],
+    ['Online %', (w) => pc(w.onlinePct, 1)],
+    ['Spend / GMV', (w) => `<span class="${sg(w.sgmv)}">${pc(w.sgmv, 1)}</span>`],
+    ['AOV', (w) => inr(w.aov)],
+    ['Daily avg spend', (w) => inr(w.spendPerDay)],
+    ['Predicted RTO %', (w) => pc(w.predictedRto, 1)],
+    ['CM %', (w) => (w.cmPct === null ? '<span class="muted small">P&amp;L pending</span>' : `<span class="${w.cmPct >= 0 ? 'good' : 'bad'}">${pc(w.cmPct, 1)}</span>`)]
+  ];
+  const head = `<div class="table-box"><table class="status-table"><thead><tr><th></th>${Wn.map((w) => `<th class="r">${esc(w.label)}<div class="muted small" style="font-weight:400;text-transform:none;letter-spacing:0">${w.from === w.to ? shortDate(w.from) : `${shortDate(w.from)}–${shortDate(w.to)}`}</div></th>`).join('')}</tr></thead>
+    <tbody>${rowsDef.map(([l, f]) => `<tr><td><strong>${esc(l)}</strong></td>${Wn.map((w) => `<td class="r num">${w.days ? f(w) : '—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const notes = `<div class="small muted" style="line-height:1.6">
+    <div><strong>Predicted RTO</strong>: 1 − delivered ÷ non-cancelled on Khoj orders placed ${shortDate(PR?.from)}–${shortDate(PR?.to)} (D-17 to D-10): COD ${pc(PR?.cod.rtoPct, 1)} (${int(PR?.cod.nonCancelled)} orders), online ${pc(PR?.online.rtoPct, 1)} (${int(PR?.online.nonCancelled)}), weighted by each window's online share. <strong>CM %</strong>: the P&amp;L run at that predicted RTO, as % of NMV.</div>
+    <div><strong>Breakeven Spend/GMV: ${pc(BE, 1)}</strong>, from yesterday's P&amp;L at the predicted RTO, ex-GST. Spend/GMV is green at or under it, amber within 3 points, red above.</div></div>`;
+  const top = card('Snapshot', 'Snapshot', `Today is ${O.daily.find((r) => r.date === O.today) ? 'so far' : 'not in yet'} · days run midnight to midnight IST`, head + notes);
 
   const R = O.rolling;
   const lab = R.map((r) => shortDate(r.date));
-  const trend = card('Trend', 'How we are trending', 'Daily, since launch · lines are 7-day averages',
-    `<div class="grid-2"><div><div class="group-title">Orders per day</div>${chartSvg({ labels: lab, bars: R.map((r) => r.orders), lines: [{ values: R.map((r) => r.orders7), color: 'var(--blue)' }], yFmt: (v) => Math.round(v), barLabel: 'orders' })}${legend([['var(--blue)', '7-day average orders']])}</div>
-     <div><div class="group-title">Spend / GMV</div>${chartSvg({ labels: lab, lines: [{ values: R.map((r) => r.sgmv), color: 'var(--orange)', width: 1, dots: true }, { values: R.map((r) => r.sgmv7), color: 'var(--orange)' }], refLine: O.breakevenAdSgmv ? { value: O.breakevenAdSgmv, label: `breakeven ~${O.breakevenAdSgmv.toFixed(0)}%`, color: 'var(--green)' } : null, yFmt: (v) => `${Math.round(v)}%`, yCap: 80 })}${legend([['var(--orange)', '7-day Spend/GMV'], ['var(--green)', 'breakeven (P&L)', true]])}</div>
-     <div><div class="group-title">Spend and GMV per day (₹)</div>${chartSvg({ labels: lab, bars: R.map((r) => r.gmv), lines: [{ values: R.map((r) => r.spend), color: 'var(--purple)' }], yFmt: (v) => `${Math.round(v / 1000)}k`, barColor: 'var(--green)', barLabel: 'GMV' })}${legend([['var(--green)', 'GMV (bars)'], ['var(--purple)', 'spend']])}</div>
-     <div><div class="group-title">Online share and AOV (7-day)</div>${chartSvg({ labels: lab, lines: [{ values: R.map((r) => r.online7), color: 'var(--blue)' }], yFmt: (v) => `${Math.round(v)}%` })}${legend([['var(--blue)', 'online orders %']])}</div></div>`);
-
-  const weeks = card('Week by week', 'Week by week', 'Mon–Sun · the current week runs to yesterday · RTO and profit from the P&L question at its predicted RTO for orders in transit', tbl([
-    { h: 'Week', v: (w) => `<strong>${esc(w.label)}</strong> <span class="muted small">${shortDate(w.week)}${w.partial ? ` · ${w.days}d` : ''}</span>` },
-    { h: 'Orders/day', r: 1, v: (w) => int(w.ordersPerDay) }, { h: 'GMV/day', r: 1, v: (w) => inr(w.gmvPerDay) }, { h: 'Spend/day', r: 1, v: (w) => inr(w.spendPerDay) },
-    { h: 'Spend/GMV', r: 1, v: (w) => pc(w.sgmv, 1), cls: (w) => (O.breakevenAdSgmv && w.sgmv !== null ? (w.sgmv <= O.breakevenAdSgmv ? 'good' : w.sgmv <= O.breakevenAdSgmv * 1.25 ? 'warn' : 'bad') : '') },
-    { h: 'AOV', r: 1, v: (w) => inr(w.aov) }, { h: 'Online', r: 1, v: (w) => pc(w.onlinePct, 1) }, { h: 'Cancelled', r: 1, v: (w) => pc(w.cancelPct, 1) },
-    { h: 'CTR', r: 1, v: (w) => pc(w.ctr, 2) }, { h: 'CPM', r: 1, v: (w) => inr(w.cpm) }, { h: 'Click→order', r: 1, v: (w) => pc(w.c2pr, 2) },
-    { h: 'RTO', r: 1, v: (w) => (w.pnl ? pc(w.pnl.rtoPct, 1) : '—') }, { h: 'Profit % (NMV)', r: 1, v: (w) => (w.pnl ? pc(w.pnl.profitPct, 1) : '—'), cls: (w) => (w.pnl ? (w.pnl.profitPct >= 0 ? 'good' : 'bad') : '') }
-  ], O.weeks, { min: 1100 }));
+  const trend = card('Trend', 'Trends', 'Daily since launch · lines are 7-day averages',
+    `<div class="grid-2"><div><div class="group-title">Orders per day</div>${chartSvg({ labels: lab, bars: R.map((r) => r.orders), lines: [{ values: R.map((r) => r.orders7), color: 'var(--blue)' }], yFmt: (v) => Math.round(v), barLabel: 'orders' })}${legend([['var(--blue)', '7-day average']])}</div>
+     <div><div class="group-title">Spend / GMV</div>${chartSvg({ labels: lab, lines: [{ values: R.map((r) => r.sgmv), color: 'var(--orange)', width: 1, dots: true }, { values: R.map((r) => r.sgmv7), color: 'var(--orange)' }], yFmt: (v) => `${Math.round(v)}%`, yCap: 80 })}${legend([['var(--orange)', '7-day Spend/GMV']])}</div>
+     <div><div class="group-title">GMV and spend per day (₹)</div>${chartSvg({ labels: lab, bars: R.map((r) => r.gmv), lines: [{ values: R.map((r) => r.spend), color: 'var(--purple)' }], yFmt: (v) => `${Math.round(v / 1000)}k`, barColor: 'var(--green)', barLabel: 'GMV' })}${legend([['var(--green)', 'GMV (bars)'], ['var(--purple)', 'spend']])}</div>
+     <div><div class="group-title">Online and cancelled % (7-day)</div>${chartSvg({ labels: lab, lines: [{ values: R.map((r) => r.online7), color: 'var(--blue)' }, { values: R.map((r) => r.cancel7), color: 'var(--orange)' }], yFmt: (v) => `${Math.round(v)}%` })}${legend([['var(--blue)', 'online %'], ['var(--orange)', 'cancelled %']])}</div></div>`);
 
   let unit = '';
-  if (PL && PL.perOrder) {
-    const u = PL.perOrder;
-    const lines = [['GMV per shipped order', u.gmv, ''], ['− lost to RTO, returns, discounts', u.nmv - u.gmv, `NMV ${pc(PL.nmvOfGmv, 0)} of GMV`], ['− paid to the seller (TP)', -u.tp, `${pc(PL.tpOfGmv, 0)} of GMV`], ['− logistics', -u.logistics, `${pc(PL.logOfGmv, 0)} of GMV`], ['− marketing', -u.mkt, `${pc(PL.mktOfGmv, 1)} of GMV`], ['= profit', u.profit, `${pc(PL.profitPct, 1)} of NMV`]];
+  const PY = O.pnl.yesterday;
+  if (PY && PY.perOrder) {
+    const u = PY.perOrder;
+    const lines = [['GMV per shipped order', u.gmv, ''], ['− lost to RTO, returns, discounts', u.nmv - u.gmv, `NMV ${pc(PY.nmvOfGmv, 0)} of GMV`], ['− paid to the seller (TP)', -u.tp, `${pc(PY.tpOfGmv, 0)} of GMV`], ['− logistics', -u.logistics, `${pc(PY.logOfGmv, 0)} of GMV`], ['− marketing (incl. GST)', -u.mkt, `${pc(PY.mktOfGmv, 1)} of GMV`], ['= contribution margin', u.profit, `${pc(PY.profitPct, 1)} of NMV`]];
     const max = u.gmv;
-    const perPt = (PL.gmv / (PL.shipped || 1)) / 100;   // ₹ per order for each point of marketing/GMV
-    unit = card('Unit economics', `Unit economics per shipped order · ${pnlLabel}`, `From the P&L at ${pc(PL.rtoPct, 0)} RTO (${int(PL.delivered)} delivered, ${int(PL.rto)} RTO, predicted for orders in transit)`,
+    unit = card('Unit economics', `Unit economics · yesterday (${shortDate(PY.start)})`, `P&L at ${pc(PY.rtoPct, 0)} RTO · ${int(PY.shipped || PY.orders)} shipped orders`,
       `<div class="grid-2"><div>${lines.map(([l, v, note], i) => `<div style="display:grid;grid-template-columns:200px 1fr 80px;gap:10px;align-items:center;margin:6px 0"><span class="small">${esc(l)}</span><span class="bar" style="min-width:0"><span style="width:${Math.min(100, Math.abs(v) / max * 100)}%;background:${i === 0 ? 'var(--blue)' : i === lines.length - 1 ? (v >= 0 ? 'var(--green)' : 'var(--orange)') : 'var(--muted)'}"></span></span><span class="num r small ${i === lines.length - 1 ? (v >= 0 ? 'good' : 'bad') : ''}">${inr(v)}</span></div><div class="muted small" style="margin:-4px 0 4px 210px">${esc(note)}</div>`).join('')}</div>
-      <div>${kpiRow([
-        ['Breakeven marketing', pc(PL.breakevenMktOfGmv, 1), 'of GMV, at this RTO and seller payout'],
-        ['Breakeven in ad Spend/GMV', pc(O.breakevenAdSgmv, 1), O.mktToSpend ? `P&L marketing is ${O.mktToSpend.toFixed(2)}× ad spend (tax, other costs)` : ''],
-        ['Each point of Spend/GMV', inr(perPt * (O.mktToSpend || 1)), 'per shipped order']
-      ])}<p class="small muted">To break even at today's RTO, ad Spend/GMV has to come down to about ${pc(O.breakevenAdSgmv, 1)}, or RTO and seller payout have to improve. Every point of RTO costs roughly ${inr((PL.nmv / Math.max(1, PL.shipped)) / Math.max(1, 100 - (PL.rtoPct || 0)))} of NMV per shipped order.</p></div></div>`);
-  }
+      <div>${kpiRow([['Breakeven Spend/GMV', pc(BE, 1), 'ad spend, ex-GST'], ['Actual yesterday', pc(Wn.find((w) => w.key === 'yesterday')?.sgmv, 1), 'day-wise, ex-GST']])}
+      <p class="small muted" style="margin-top:10px">Breakeven = (NMV − seller payout − logistics) ÷ GMV = ${pc(PY.breakevenMktOfGmv, 1)} of GMV available for marketing including GST; ÷ 1.18 to compare with ad spend, which the day-wise question tracks without GST.</p></div></div>`);
+  } else unit = card('Unit economics', 'Unit economics · yesterday', '', '<p class="small muted">Waiting for yesterday\'s P&amp;L (Q16167), pulled every 2 hours.</p>');
 
-  const D = O.drivers;
-  const drivers = D ? card('Why Spend/GMV moved', `Why Spend/GMV moved ${D.delta >= 0 ? 'up' : 'down'} ${Math.abs(D.delta).toFixed(1)} pts this week`, 'Last 7 days vs the 7 before. Spend/GMV = CPM ÷ (1000 × CTR × click→order × AOV), so the change splits into these four.', tbl([
-    { h: 'Driver', v: (r) => esc(r.label) }, { h: 'Effect on Spend/GMV', r: 1, v: (r) => `${r.points >= 0 ? '+' : ''}${r.points.toFixed(1)} pts`, cls: (r) => (r.points > 0 ? 'bad' : 'good') },
-    { h: 'Last 7 days', r: 1, v: (r) => ({ 'CPM (cost of reach)': inr(L.cpm), 'CTR (ad click rate)': pc(L.ctr, 2), 'Click → order rate': pc(L.c2pr, 2), AOV: inr(L.aov) })[r.label] },
-    { h: 'The 7 before', r: 1, v: (r) => ({ 'CPM (cost of reach)': inr(P.cpm), 'CTR (ad click rate)': pc(P.ctr, 2), 'Click → order rate': pc(P.c2pr, 2), AOV: inr(P.aov) })[r.label] }
-  ], D.rows)) : '';
-
-  // PMF snapshot from the rest of the dashboard.
-  const allK = Object.values(d.kpis || {});
-  const wins = allK.reduce((a, k) => a + (k.winners || 0), 0), losses = allK.reduce((a, k) => a + (k.losses || 0), 0), tested = allK.reduce((a, k) => a + (k.tested || 0), 0);
-  const rp = d.customers?.repeat, b14 = d.repeatBench?.rates?.d14, w14 = rp?.curves?.find((c) => c.days === 14)?.khoj;
-  const pers = d.customers?.audience?.personalisation;
-  const snap = card('PMF snapshot', 'PMF snapshot', 'Headlines from the PMF View', kpiRow([
-    ['Products tested', int(tested), `${int(wins)} winners · ${int(losses)} killed`],
-    ['Success rate', wins + losses ? pc(wins / (wins + losses) * 100) : '—', 'winners ÷ decided trials'],
-    ['New to ShopDeck', pc(d.customers?.audience?.newToSdPct, 1), 'of Khoj buyers'],
-    ['Back within 14 days', w14?.eligible ? pc(w14.pct, 1) : '—', b14 !== undefined && b14 !== null ? `parent sellers: ${pc(b14, 1)}` : ''],
-    ['Repeat Khoj orders paid online', pc(rp?.payment?.repeatOnlinePct, 1), rp?.payment ? `first orders: ${pc(rp.payment.firstOnlinePct, 1)}` : ''],
-    ['Orders predictable (30 days)', pers ? pc((pers.browsing?.levels.find((x) => x.key === 'all_any') || pers.levels.find((x) => x.key === 'any'))?.d30, 1) : '—', 'from ShopDeck history']
-  ]) + `<p class="small"><button type="button" class="btn" data-tab="pmf">Open the PMF View</button></p>`);
-
-  const ops = card('Operations', 'Operations', 'From the day-wise question', kpiRow([
-    ['Not dispatched, older than yesterday', int(O.backlog), 'orders'],
-    ['Yesterday not dispatched', int(O.daily.find((r) => r.date === O.yesterday)?.notDispatched), `of ${int(O.daily.find((r) => r.date === O.yesterday)?.nonCancelled)} orders`],
-    ['Cancelled, last 7 days', pc(L.cancelPct, 1), `${int(L.cancelled)} orders`],
-    ['Cost per order', inr(L.cpo), `was ${inr(P.cpo)}`]
-  ]));
-  return head + trend + unit + drivers + weeks + snap + ops;
+  const weeks = card('Week over week', 'Week over week', 'Mon–Sun · the current week runs to yesterday · RTO and CM from the P&L at the predicted RTO', tbl([
+    { h: 'Week', v: (w) => `<strong>${esc(w.label)}</strong> <span class="muted small">${shortDate(w.week)}${w.partial ? ` · ${w.days}d` : ''}</span>` },
+    { h: 'Orders/day', r: 1, v: (w) => int(w.ordersPerDay) }, { h: 'GMV/day', r: 1, v: (w) => inr(w.gmvPerDay) }, { h: 'Spend/day', r: 1, v: (w) => inr(w.spendPerDay) },
+    { h: 'Spend/GMV', r: 1, v: (w) => pc(w.sgmv, 1), cls: (w) => sg(w.sgmv) },
+    { h: 'AOV', r: 1, v: (w) => inr(w.aov) }, { h: 'Online', r: 1, v: (w) => pc(w.onlinePct, 1) }, { h: 'Cancelled', r: 1, v: (w) => pc(w.cancelPct, 1) },
+    { h: 'CTR', r: 1, v: (w) => pc(w.ctr, 2) }, { h: 'CPM', r: 1, v: (w) => inr(w.cpm) }, { h: 'Click→order', r: 1, v: (w) => pc(w.c2pr, 2) },
+    { h: 'RTO', r: 1, v: (w) => (w.pnl ? pc(w.pnl.rtoPct, 1) : '—') }, { h: 'CM %', r: 1, v: (w) => (w.pnl ? pc(w.pnl.profitPct, 1) : '—'), cls: (w) => (w.pnl ? (w.pnl.profitPct >= 0 ? 'good' : 'bad') : '') }
+  ], O.weeks, { min: 1100 }));
+  return top + trend + unit + weeks;
 }
 
 // ---------- Scaling Plan & Status ----------
@@ -899,7 +890,7 @@ function viewPlan(d) {
   const S = d.scaling;
   if (!S) return '';
   const P = S.plan, A = P.assumptions, L = S.labels;
-  const k = (v) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : Math.abs(v) >= 1000 ? `₹${(v / 1000).toFixed(1)}k` : inr(v));
+  const k = (v) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : Math.abs(v) >= 1e7 ? `₹${(v / 1e7).toFixed(2)} Cr` : Math.abs(v) >= 1e5 ? `₹${(v / 1e5).toFixed(1)} L` : Math.abs(v) >= 1000 ? `₹${(v / 1000).toFixed(1)}k` : inr(v));
   const p1 = (v) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : `${v.toFixed(0)}%`);
   const n0 = (v) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : Math.round(v).toLocaleString('en-IN'));
   const rows = S.rows;
@@ -941,12 +932,12 @@ function viewPlan(d) {
   const bars = (f) => rows.map((r) => (r.actual ? f(r.actual) ?? null : null));
   const plan = (f) => rows.map((r) => (r.plan ? f(r.plan) ?? null : null));
   const tones = (f, lower) => rows.map((r) => TONE[r.actual ? toneOf(f(r.actual), r.plan ? f(r.plan) : null, lower) : 'muted']);
-  const charts = card('Weekly charts', 'Week by week against plan', 'Bars are actuals (per-day averages; colour = vs plan), the dashed line is the plan',
+  const charts = card('Weekly charts', 'Week by week against plan', 'Bars are actuals (per-day averages; colour = vs plan), the dashed line is the plan · orders, spend and winners on a log scale (each gridline is 10×)',
     `<div class="grid-2">
-      <div><div class="group-title">Orders per day</div>${chartSvg({ labels: lab, bars: bars((x) => x.ordersPerDay), barColors: tones((x) => x.ordersPerDay), barOpacity: 0.85, lines: [{ values: plan((x) => x.ordersPerDay), color: 'var(--ink)', dash: true, dots: true }], yFmt: (v) => Math.round(v), barLabel: 'orders/day' })}${legend([['var(--ink)', 'plan', true]])}</div>
-      <div><div class="group-title">Spend per day (₹)</div>${chartSvg({ labels: lab, bars: bars((x) => x.das.total), barColors: tones((x) => x.das.total), barOpacity: 0.85, lines: [{ values: plan((x) => x.das.total), color: 'var(--ink)', dash: true, dots: true }], yFmt: (v) => `${Math.round(v / 1000)}k` })}${legend([['var(--ink)', 'plan', true]])}</div>
+      <div><div class="group-title">Orders per day</div>${chartSvg({ labels: lab, bars: bars((x) => x.ordersPerDay), barColors: tones((x) => x.ordersPerDay), barOpacity: 0.85, lines: [{ values: plan((x) => x.ordersPerDay), color: 'var(--ink)', dash: true, dots: true }], yFmt: (v) => n0(v), barLabel: 'orders/day', log: true })}${legend([['var(--ink)', 'plan', true]])}</div>
+      <div><div class="group-title">Spend per day (₹)</div>${chartSvg({ labels: lab, bars: bars((x) => x.das.total), barColors: tones((x) => x.das.total), barOpacity: 0.85, lines: [{ values: plan((x) => x.das.total), color: 'var(--ink)', dash: true, dots: true }], yFmt: k, log: true })}${legend([['var(--ink)', 'plan', true]])}</div>
       <div><div class="group-title">Spend / GMV</div>${chartSvg({ labels: lab, bars: bars((x) => x.sgmv.overall), barColors: tones((x) => x.sgmv.overall, true), barOpacity: 0.85, lines: [{ values: plan((x) => x.sgmv.overall), color: 'var(--ink)', dash: true, dots: true }], refLine: d.overview?.breakevenAdSgmv ? { value: d.overview.breakevenAdSgmv, label: `breakeven ~${d.overview.breakevenAdSgmv.toFixed(0)}%`, color: 'var(--green)' } : null, yFmt: (v) => `${Math.round(v)}%`, yCap: 80 })}${legend([['var(--ink)', 'plan', true], ['var(--green)', 'breakeven', true]])}</div>
-      <div><div class="group-title">Winners found (lifetime)</div>${chartSvg({ labels: lab, bars: bars((x) => x.testing.winners), barColors: tones((x) => x.testing.winners), barOpacity: 0.85, lines: [{ values: plan((x) => x.testing.winners), color: 'var(--ink)', dash: true, dots: true }], yFmt: (v) => Math.round(v) })}${legend([['var(--ink)', 'plan', true]])}</div>
+      <div><div class="group-title">Winners found (lifetime)</div>${chartSvg({ labels: lab, bars: bars((x) => x.testing.winners), barColors: tones((x) => x.testing.winners), barOpacity: 0.85, lines: [{ values: plan((x) => x.testing.winners), color: 'var(--ink)', dash: true, dots: true }], yFmt: (v) => n0(v), log: true })}${legend([['var(--ink)', 'plan', true]])}</div>
     </div>`);
 
   // 4. Assumptions and risks, colour-coded.
@@ -969,39 +960,46 @@ function viewPlan(d) {
     { h: 'Spend / day', r: 1, v: (r) => cell(r, (x) => x.das.total, k) },
     { h: 'Spend / GMV', r: 1, v: (r) => cell(r, (x) => x.sgmv.overall, p1, true) },
     { h: 'AOV', r: 1, v: (r) => cell(r, (x) => x.aov, inr) },
-    { h: 'Tested', r: 1, v: (r) => cell(r, (x) => x.testing.tested, n0) },
-    { h: 'Winners', r: 1, v: (r) => cell(r, (x) => x.testing.winners, n0) }
-  ], rows, { min: 900 });
+    { h: 'Hits scaling', r: 1, v: (r) => cell(r, (x) => (x.hits ? x.hits.active : x.testing.winners), n0) },
+    { h: 'Trials running', r: 1, v: (r) => cell(r, (x) => (x.hits ? x.hits.trialsRunning : x.testing.inTesting), n0) }
+  ], rows, { min: 980 });
   const col = (h, get, f, lower) => ({ h, r: 1, v: (r) => cell(r, get, f, lower) });
   const full = tbl([
     { h: 'Week', v: (r) => `<strong>${shortDate(r.week)}</strong>` },
-    col('DAS total', (x) => x.das.total, k), col('DAS Meta', (x) => x.das.meta, k), col('DAS Google', (x) => x.das.google, k),
-    col(`DAS ${L.catalog}`, (x) => x.das.catalog, k), col(`DAS ${L.winners}`, (x) => x.das.winners, k), col(`DAS ${L.testing}`, (x) => x.das.testing, k), col(`DAS ${L.metaOther}`, (x) => x.das.metaOther, k),
+    col('DAS total', (x) => x.das.total, k), col(`DAS ${L.catalog}`, (x) => x.das.catalog, k), col(`DAS ${L.winners}`, (x) => x.das.winners, k), col(`DAS ${L.testing}`, (x) => x.das.testing, k), col(`DAS ${L.metaOther}`, (x) => x.das.metaOther, k), col('DAS Google', (x) => x.das.google, k),
     col('S/GMV catalog', (x) => x.sgmv.catalog, p1, true), col('S/GMV winners', (x) => x.sgmv.winners, p1, true), col('S/GMV testing', (x) => x.sgmv.testing, p1, true),
-    col('In testing', (x) => x.testing.inTesting, n0), col('Killed', (x) => x.testing.killed, n0), col('Success %', (x) => x.testing.successPct, p1)
+    { h: 'GMV mix: catalog / winners / testing / Google', r: 1, v: (r) => (r.plan?.gmvMix ? `<span class="muted">${['catalog', 'winners', 'testing', 'google'].map((b) => Math.round(r.plan.gmvMix[b])).join(' / ')}%</span>` : '—') },
+    { h: 'New trials / week', r: 1, v: (r) => (r.plan?.hits ? `<span class="muted">${n0(r.plan.hits.trialsStarted)}</span>` : '—') }
   ], rows, { min: 1500 });
   const weekCard = card('Week-wise plan', 'Week-wise plan and actuals', 'Actual on top (green on/above plan, amber within 10%, red behind), plan underneath; future weeks show the plan.', simple +
-    `<details><summary style="cursor:pointer;font-weight:600" class="small">Spend by bucket (Meta catalog, winners, testing, other, Google)</summary><p class="small muted" style="margin:8px 0">DAS = daily average spend. Meta S/GMV per bucket is Meta-reported (×${d.settings.metaSgmvFactor} correction) and over-counts across buckets; overall S/GMV uses actual orders. Google = day-wise total spend − Meta spend.</p>${full}</details>`);
+    `<details><summary style="cursor:pointer;font-weight:600" class="small">Spend by bucket, catalog efficiency needed, GMV mix and trials</summary><p class="small muted" style="margin:8px 0">DAS = daily average spend. Actual Meta S/GMV per bucket is Meta-reported (×${d.settings.metaSgmvFactor} correction) and over-counts across buckets; overall S/GMV uses actual orders. Google = day-wise total spend − Meta spend. Plan S/GMV catalog is what catalog must run at for the total to stay at ${P.targetSgmv}%.</p>${full}</details>`);
 
-  // 6. Editor.
-  const inp = (name, v, w = 90) => `<input name="${name}" value="${esc(v)}" inputmode="decimal" style="width:${w}px;min-height:34px;border:1px solid var(--line);border-radius:6px;padding:0 6px;background:var(--surface);color:inherit;font:inherit;font-size:13px">`;
-  const planWeeks = rows.filter((r) => r.plan).map((r) => r.week);
-  const das = ['testing', 'catalog', 'metaOther', 'google'];
-  const editor = `<details ${P.saved ? '' : 'open'}><summary style="cursor:pointer;font-weight:600">Edit the plan</summary>
-    <form id="planForm" style="margin-top:12px;display:flex;flex-direction:column;gap:14px">
-      <div class="settings">${[['aov', 'AOV (₹)', A.aov], ['successPct', 'Trial success %', A.successPct], ['trialBudget', 'Trial budget (₹/day)', A.trialBudget], ['trialDays', 'Days per trial', A.trialDays], ['winnerDas', 'Avg daily budget per winner (₹)', A.winnerDas], ['winnerLifeWeeks', 'Weeks a winner scales', A.winnerLifeWeeks]].map(([n2, l, v]) => `<div class="field"><label>${esc(l)}</label>${inp('a_' + n2, v, 120)}</div>`).join('')}
-      ${['testing', 'winners', 'catalog', 'metaOther', 'google'].map((b) => `<div class="field"><label>Spend/GMV % · ${esc(L[b])}</label>${inp('s_' + b, A.sgmv[b], 120)}</div>`).join('')}
-      <div class="field"><label>Plan starts (week of)</label>${inp('startWeek', P.startWeek, 120)}</div><div class="field"><label>Weeks</label>${inp('weeks', P.weeks, 120)}</div></div>
-      <div class="table-box"><table style="min-width:${200 + planWeeks.length * 100}px"><thead><tr><th>Daily spend (₹)</th>${planWeeks.map((w) => `<th class="r">${shortDate(w)}</th>`).join('')}</tr></thead><tbody>
-        ${das.map((b) => `<tr><td>${esc(L[b])}</td>${P.das[b].map((v, i) => `<td class="r">${inp(`d_${b}_${i}`, v, 84)}</td>`).join('')}</tr>`).join('')}
-        <tr><td class="muted">Meta winners (from success % × trials)</td>${rows.filter((r) => r.plan).map((r) => `<td class="r muted small">${k(r.plan.das.winners)}</td>`).join('')}</tr>
-        <tr><td class="muted"><strong>Orders / day this gives</strong></td>${rows.filter((r) => r.plan).map((r) => `<td class="r small"><strong>${n0(r.plan.ordersPerDay)}</strong></td>`).join('')}</tr>
-      </tbody></table></div>
+  // 6. Editor: the targets and assumptions; everything week by week follows from them.
+  const inp = (name, v, w = 120) => `<input name="${name}" value="${esc(v)}" ${name === 'startWeek' || name.startsWith('m_date') ? '' : 'inputmode="decimal"'} style="width:${w}px;min-height:34px;border:1px solid var(--line);border-radius:6px;padding:0 6px;background:var(--surface);color:inherit;font:inherit;font-size:13px">`;
+  const f = (name, label, v, hint = '') => `<div class="field"><label>${esc(label)}</label>${inp(name, v)}${hint ? `<span class="def">${esc(hint)}</span>` : ''}</div>`;
+  const ms = P.milestones;
+  const editor = `<details ${P.saved ? '' : 'open'}><summary style="cursor:pointer;font-weight:600">Targets and assumptions</summary>
+    <form id="planForm" style="margin-top:12px;display:flex;flex-direction:column;gap:16px">
+      <div><div class="group-title">Targets</div><div class="settings" style="margin-top:8px">
+        ${f('startWeek', 'Plan starts (week of)', P.startWeek)}${f('startOpd', 'Orders/day at the start', P.startOpd, `L7D now: ${n0(d.overview?.last7?.ordersPerDay)}`)}
+        ${ms.map((m, i) => f(`m_date_${i}`, `Milestone ${i + 1}: date`, m.date) + f(`m_opd_${i}`, `Milestone ${i + 1}: orders/day`, m.opd)).join('')}
+        ${f('targetSgmv', 'Total Spend/GMV to hold (%)', P.targetSgmv)}${f('bandLo', 'Band low (%)', P.sgmvBand[0])}${f('bandHi', 'Band high (%)', P.sgmvBand[1])}
+      </div></div>
+      <div><div class="group-title">Hits</div><div class="settings" style="margin-top:8px">
+        ${f('a_winnersShare', 'GMV from hits by the end (%)', A.winnersShare, 'ramps up from 0 at the start')}${f('a_winnerDas', 'Daily budget per hit at scale (₹)', A.winnerDas, `top of the ladder: ${inr(d.settings.ladder?.at(-1))}`)}
+        ${f('s_winners', 'Spend/GMV of a hit at scale (%)', A.sgmv.winners)}${f('a_winnerLifeWeeks', 'Weeks a hit keeps scaling', A.winnerLifeWeeks)}
+        ${f('a_successPct', 'Trial success (%)', A.successPct, `actual so far: ${pc(S.checks.find((c) => c.key === 'success')?.actual, 0)}`)}${f('a_trialBudget', 'Trial budget (₹/day)', A.trialBudget)}${f('a_trialDays', 'Days per trial', A.trialDays)}${f('s_testing', 'Spend/GMV in testing (%)', A.sgmv.testing)}
+      </div></div>
+      <div><div class="group-title">Other channels</div><div class="settings" style="margin-top:8px">
+        ${f('a_googleShare', 'GMV from Google (%)', A.googleShare)}${f('s_google', 'Google Spend/GMV (%)', A.sgmv.google)}${f('a_otherShare', 'GMV from other Meta (%)', A.otherShare)}${f('s_metaOther', 'Other Meta Spend/GMV (%)', A.sgmv.metaOther)}${f('a_aov', 'AOV (₹)', A.aov)}
+      </div><p class="small muted" style="margin-top:6px">Catalog carries the rest of the GMV with the rest of the budget: the plan shows the Spend/GMV it needs.</p></div>
       <div style="display:flex;gap:8px"><button type="submit" class="btn btn-primary">Save plan</button><button type="button" class="btn" id="resetPlan">Reset to default</button></div>
     </form></details>`;
   const noData = !rows.some((r) => r.actual && r.actual.ordersPerDay) ? `<div class="notice notice-amber">No orders from the day-wise question yet (Q16083), so actuals are blank. It's pulled every hour in the background; press Refresh after the next pull.</div>` : '';
+  const end = rows.filter((r) => r.plan).at(-1)?.plan;
+  const summary = end ? `<p style="margin:0;font-size:15px;line-height:1.6">${ms.map((m) => { const r = rows.find((x) => x.plan && x.week <= m.date && addDays(x.week, 6) >= m.date) || rows.filter((x) => x.plan).at(-1); return `<strong>${n0(m.opd)} orders/day by ${shortDate(m.date)}</strong> takes ${k(r.plan.das.total)} a day of spend (${k(r.plan.gmvPerDay)} GMV), ${n0(r.plan.hits.active)} hits scaling and ${n0(r.plan.hits.trialsStarted)} new trials a week, with catalog at ${p1(r.plan.sgmv.catalog)} Spend/GMV.`; }).join(' ')} Total Spend/GMV held at ${P.targetSgmv}% throughout.</p>` : '';
   return noData + head + card('Week strip', 'Orders per day, week by week', 'Green on or above plan · amber within 10% · red more than 10% behind · grey future', strip) + charts + risks + weekCard +
-    card('Plan editor', 'The plan', P.saved ? 'Saved plan. Spend is the input; orders follow from Spend/GMV and AOV, and the winners budget from the testing budget × success %.' : 'Default placeholder plan: set your weekly budgets and assumptions and save.', editor);
+    card('Plan editor', 'The plan', (P.saved ? 'Saved plan. ' : 'Default plan from the targets you gave: 1,000 orders/day by the end of November and 10,000 by the end of January at 20–22% Spend/GMV. ') + 'Change the targets or assumptions and the weeks recompute.', summary + editor);
 }
 
 // ---------- PMF View ----------
@@ -1055,11 +1053,18 @@ function viewPmfSummary(d) {
 
   const baseHit = st.baseHitPct || (uAll ? (uHero / uAll) * 100 : null);
   const hitS = sr === null ? 'data' : !st.baseHitPct ? 'data' : decided < 10 ? 'early' : sr >= baseHit * 1.5 ? 'yes' : sr >= baseHit ? 'partly' : 'no';
-  const qOnline = cmp ? 100 - cmp.khoj.codPct : null, qOnlineB = cmp ? 100 - cmp.shopdeckBefore.codPct : null;
-  const qRto = cmp?.khoj.rtoPct, qRtoB = cmp?.shopdeckBefore.rtoPct;
-  const qWins = cmp ? [qRto <= qRtoB, qOnline >= qOnlineB, cmp.khoj.cancelPct <= cmp.shopdeckBefore.cancelPct].filter(Boolean).length : null;
-  const qS = cmp ? (qWins === 3 ? 'yes' : qWins >= 1 ? 'partly' : 'no') : 'data';
-  const rS = !rp || b14 === null || b14 === undefined ? 'data' : !w14?.eligible ? 'early' : w14.eligible < 100 ? 'early' : w14.pct >= b14 ? 'yes' : w14.pct >= b14 * 0.8 ? 'partly' : 'no';
+  // Customer quality: Khoj vs the same products on their own seller sites (order-quality question).
+  const Q = d.productQuality;
+  const qChecks = Q ? [[Q.rto, true], [Q.online, false], [Q.cancel, true]].filter(([m]) => m && m.khoj !== null && m.seller !== null) : [];
+  const qWins = qChecks.filter(([m, lower]) => (lower ? m.khoj <= m.seller : m.khoj >= m.seller)).length;
+  const qS = !qChecks.length ? 'data' : qWins === qChecks.length ? 'yes' : qWins ? 'partly' : 'no';
+  // Repeat: early indicator (back within 7 days) and actual repeat (14 days), each vs parent sellers.
+  const w7 = rp?.curves.find((c) => c.days === 7)?.khoj, b7 = RB?.rates?.d7;
+  const rStat = (w, b) => (!rp || b === null || b === undefined ? 'data' : !w?.eligible || w.eligible < 100 ? 'early' : w.pct >= b ? 'yes' : w.pct >= b * 0.8 ? 'partly' : 'no');
+  const eS = rStat(w7, b7), rS = rStat(w14, b14);
+  const repEv = (w, b, days) => (!w?.eligible ? `Not enough buyers ${days}+ days past their first order yet.` : b === null || b === undefined ? `Back within ${days} days: <strong>${pc(w.pct, 1)}</strong> Khoj. The parent-seller benchmark (Q16725) hasn't loaded yet.` : `Back within ${days} days: ${vs(w.pct, b)} parent sellers (order-weighted), on ${int(w.eligible)} buyers old enough to count.${w.eligible < 100 ? ' Under 100 buyers, so early.' : ''}`);
+  const cat = d.catalog?.summary ? d.catalog.summary.reduce((a, x) => ({ hits: a.hits + x.hits, readable: a.readable + x.readable }), { hits: 0, readable: 0 }) : null;
+  const catHit = cat && cat.readable ? (cat.hits / cat.readable) * 100 : null;
   const conv = MM.ordersPerSession, pps = MM.productsPerSession;
   const cS = !conv || conv.khoj === null || !conv.bench ? 'data' : conv.khoj >= conv.bench && pps?.khoj >= pps?.bench ? 'yes' : conv.khoj >= conv.bench || pps?.khoj >= pps?.bench ? 'partly' : 'no';
   const dS = anyPred ? (anyPred.d30 >= 25 ? 'potential' : 'partly') : 'data';
@@ -1068,18 +1073,18 @@ function viewPmfSummary(d) {
   const vs = (k2, b, unit = '%', dd = 1) => `<strong>${f1(k2, dd)}${unit}</strong> Khoj vs <strong>${f1(b, dd)}${unit}</strong>`;
   const subs1 = [
     row(hitS, 'Lower wasted spend in finding hits (step-higher hit %)',
-      sr === null ? 'No trial verdicts yet.' : `${st.baseHitPct ? `Hit rate ${vs(sr, baseHit, '%', 0)} base sellers.` : `Khoj hit rate <strong>${pc(sr, 0)}</strong>. Base sellers' hit rate on products they advertise isn't measured yet: set it in Rules → PMF benchmarks.${baseHit ? ` For context, ${pc(baseHit, 1)} of ShopDeck PQ ≥ 3 listings clear the hero bar (not like for like: most listings are never advertised).` : ''}`} ${wins} hits from ${decided} decided trials (±${Math.round(ci)} pts), ${live} still testing. Testing spend per hit: <strong>${wins ? inr(testSpend / wins) : '—'}</strong>.${decided < 10 ? ' Fewer than 10 verdicts, so the rate can still swing a lot.' : ''}`, 'hits'),
+      sr === null ? 'No trial verdicts yet.' : `${st.baseHitPct ? `Hit rate ${vs(sr, baseHit, '%', 0)} base sellers.` : `Khoj hit rate <strong>${pc(sr, 0)}</strong>. Base sellers' hit rate on products they advertise isn't measured yet: set it in Rules → PMF benchmarks.${baseHit ? ` For context, ${pc(baseHit, 1)} of ShopDeck PQ ≥ 3 listings clear the hero bar (not like for like: most listings are never advertised).` : ''}`} ${wins} hits from ${decided} decided trials (±${Math.round(ci)} pts), ${live} still testing. Testing spend per hit: <strong>${wins ? inr(testSpend / wins) : '—'}</strong>.${decided < 10 ? ' Fewer than 10 verdicts, so the rate can still swing a lot.' : ''}${catHit !== null ? ` Catalog (directional): <strong>${pc(catHit, 0)}</strong> of ${int(cat.readable)} products with ≥ ${inr(st.catalogMinSpend)} catalog spend run at ≤ ${st.winBar}% Spend/GMV.` : ''}`, 'hits'),
     row(qS, 'Better customer quality than base sellers',
-      cmp ? `Same customers, Khoj vs their orders on seller sites: RTO ${vs(qRto, qRtoB)} · online ${vs(qOnline, qOnlineB)} · cancelled ${vs(cmp.khoj.cancelPct, cmp.shopdeckBefore.cancelPct)}.${pay ? ` Repeat Khoj orders paid online: <strong>${pc(pay.repeatOnlinePct, 1)}</strong> (first orders ${pc(pay.firstOnlinePct, 1)}).` : ''}` : 'Needs the Khoj buyers\' order history (Q16717).', 'quality'),
-    row(rS, 'Better repeat rate than base sellers',
-      w14?.eligible && (b14 === null || b14 === undefined) ? `Back within 14 days: <strong>${pc(w14.pct, 1)}</strong> Khoj. The parent-seller benchmark (Q16725) hasn't loaded yet.` : w14?.eligible ? `Back within 14 days: ${vs(w14.pct, b14)} parent sellers (order-weighted), on ${int(w14.eligible)} buyers old enough to count.${w14.eligible < 100 ? ' Under 100 buyers, so early.' : ''}` : 'Not enough buyers 14+ days past their first order yet.', 'repeat'),
+      Q ? `Khoj vs the same products on their own seller sites: RTO ${vs(Q.rto.khoj, Q.rto.seller)} (D-17 to D-10) · COD RTO ${vs(Q.codRto.khoj, Q.codRto.seller)} · online ${vs(Q.online.khoj, Q.online.seller)} (L15D) · cancelled ${vs(Q.cancel.khoj, Q.cancel.seller)}.${pay ? ` Repeat Khoj orders paid online: <strong>${pc(pay.repeatOnlinePct, 1)}</strong> (first orders ${pc(pay.firstOnlinePct, 1)}).` : ''}` : 'Needs the order-quality question (sql/product_quality.sql, MB_Q_PRODUCT_QUALITY).', 'quality'),
+    row(eS, 'Better repeat rate: early indicators', `${repEv(w7, b7, 7)} Leading signals (ratings, return visits) are still to come.`, 'early'),
+    row(rS, 'Better repeat rate: actual repeats', repEv(w14, b14, 14), 'repeat'),
     row(cS, 'Better website conversion from more cross-selling',
       conv ? `Orders per 100 sessions ${vs(conv.khoj, conv.bench, '', 2)} the same first products on seller sites · products viewed per session ${vs(pps?.khoj, pps?.bench, '', 2)}.${B?.otherPct !== undefined ? ` ${pc(B.otherPct, 1)} of buy-now clicks are on a different product than the one landed on.` : ''}` : 'Needs the site sessions question (Q16724).', 'cross'),
     row(dS, 'ShopDeck\'s data advantage',
       anyPred ? `<strong>${pc(anyPred.d30, 1)}</strong> of Khoj orders were predictable from the buyer's ShopDeck orders and browsing in the 30 days before. ${V ? `${pc(V.linkedPct, 1)} of visitors are identifiable at landing; personalising them could take conversion from ${pc(V.conversionPct, 2)} to ~${pc(V.estimate?.conservative?.newConversionPct, 2)}.` : ''} Not used on the site yet.` : 'Needs the browsing and personalisation questions.', 'data')
   ];
   const counts = (list) => { const c = { yes: 0, partly: 0, no: 0 }; for (const s of list) if (c[s] !== undefined) c[s]++; return c; };
-  const c1 = counts([hitS, qS, rS, cS]);
+  const c1 = counts([hitS, qS, eS, rS, cS]);
   const sec1 = `<section class="card" aria-label="Lower cost of doing business"><div class="card-head"><div><h2>1 · Lower cost of doing business</h2><span class="muted small">Thesis: Khoj sells at a lower Spend/NMV than base sellers, because each of the drivers below is better</span></div>${stChip(t1)}</div>
     <div class="thesis-head plan-${{ yes: 'good', partly: 'warn', no: 'bad' }[t1] || ''}">
       <div><div class="small muted">Khoj Spend / NMV (P&amp;L marketing ÷ NMV, since launch)</div><div class="big num">${pc(kSn, 1)}</div><div class="small">last 7 days ${pc(kSn7, 1)}</div></div>
@@ -1128,19 +1133,27 @@ function viewPmfSummary(d) {
 }
 
 function qualityTopCard(d) {
-  const a = d.customers?.audience, cmp = a?.compare, O = d.overview;
-  if (!cmp && !O) return '';
-  const pay = a?.byPayment || [];
-  const cod = pay.find((x) => x.key === 'COD'), pre = pay.find((x) => x.key === 'Prepaid');
-  return card('Customer quality at a glance', 'Customer quality at a glance', 'Khoj orders vs the same customers on ShopDeck seller sites (before Khoj), plus the last 7 days from the day-wise and P&L questions', kpiRow([
-    ['Online orders, last 7 days', pc(O?.last7.onlinePct, 1), O ? `the 7 before: ${pc(O.prev7.onlinePct, 1)}` : ''],
-    ['Repeat Khoj orders paid online', pc(a ? d.customers.repeat?.payment?.repeatOnlinePct : null, 1), d.customers?.repeat?.payment ? `first orders: ${pc(d.customers.repeat.payment.firstOnlinePct, 1)} · ${int(d.customers.repeat.payment.repeatOrders)} repeat orders` : ''],
-    ['Online share: Khoj vs sellers', cmp ? `${pc(100 - cmp.khoj.codPct, 1)} vs ${pc(100 - cmp.shopdeckBefore.codPct, 1)}` : '—', 'same customers'],
-    ['RTO: Khoj vs sellers', cmp ? `${pc(cmp.khoj.rtoPct, 1)} vs ${pc(cmp.shopdeckBefore.rtoPct, 1)}` : '—', 'of delivered + returned'],
-    ['COD RTO', pc(cod?.rtoPct, 1), pre ? `prepaid: ${pc(pre.rtoPct, 1)}` : ''],
-    ['Cancelled: Khoj vs sellers', cmp ? `${pc(cmp.khoj.cancelPct, 1)} vs ${pc(cmp.shopdeckBefore.cancelPct, 1)}` : '—', ''],
-    ['RTO (P&L, last 7 days)', pc(O?.pnl.last7?.rtoPct, 1), 'includes predicted RTO for orders in transit']
-  ]));
+  const Q = d.productQuality, O = d.overview, pay = d.customers?.repeat?.payment;
+  const l15 = O ? (() => { const days = O.daily.filter((r) => r.date >= addDays(O.today, -15) && r.date < O.today); const o = days.reduce((a, r) => a + r.orders, 0); return { online: o ? days.reduce((a, r) => a + r.online, 0) / o * 100 : null, cancel: o ? days.reduce((a, r) => a + r.cancelled, 0) / o * 100 : null, orders: o }; })() : null;
+  const cmp = (m, lowerBetter) => {
+    if (!m || m.khoj === null) return { v: '—', tone: '' };
+    const tone = m.seller === null ? '' : (lowerBetter ? m.khoj <= m.seller : m.khoj >= m.seller) ? 'good' : 'bad';
+    return { v: `<span class="${tone}">${pc(m.khoj, 1)}</span>${m.seller !== null ? ` <span class="muted" style="font-size:15px">vs ${pc(m.seller, 1)}</span>` : ''}`, tone };
+  };
+  const cov = (m) => (m && m.coverage !== null ? ` · seller data for ${pc(m.coverage, 0)} of Khoj orders` : '');
+  const PR = O?.predictedRto;
+  const rtoWin = PR ? `orders ${shortDate(PR.from)}–${shortDate(PR.to)} (D-17 to D-10)` : 'D-17 to D-10';
+  const cards = [
+    ['Online orders, L15D', pc(l15?.online, 1), l15 ? `all Khoj orders, ${int(l15.orders)} in 15 days` : ''],
+    ['Online share: Khoj vs same products', cmp(Q?.online).v, Q ? `on their own seller sites, L15D${cov(Q.online)}` : 'needs the order-quality question'],
+    ['RTO: Khoj vs same products', cmp(Q?.rto, true).v, `not delivered ÷ non-cancelled, ${rtoWin}`],
+    ['COD RTO: Khoj vs same products', cmp(Q?.codRto, true).v, Q?.onlineRto?.khoj !== null && Q ? `online: ${pc(Q.onlineRto.khoj, 1)} vs ${pc(Q.onlineRto.seller, 1)}` : ''],
+    ['Cancelled: Khoj vs same products', cmp(Q?.cancel, true).v, 'L15D'],
+    ['Repeat Khoj orders paid online', pc(pay?.repeatOnlinePct, 1), pay ? `first orders: ${pc(pay.firstOnlinePct, 1)} · ${int(pay.repeatOrders)} repeat orders` : '']
+  ];
+  const missing = !Q ? '<p class="small muted">The like-for-like comparison needs the order-quality question: add it to Metabase from <code>sql/product_quality.sql</code> and set <code>MB_Q_PRODUCT_QUALITY</code> on Netlify. Khoj-only numbers fill in meanwhile from the day-wise question and the predicted RTO.</p>' : '';
+  if (!Q && PR) { cards[2][1] = pc(PR.all.rtoPct, 1); cards[2][2] = `Khoj only, ${rtoWin}`; cards[3][1] = pc(PR.cod.rtoPct, 1); cards[3][2] = `Khoj only · online ${pc(PR.online.rtoPct, 1)}`; cards[4][1] = pc(l15?.cancel, 1); cards[4][2] = 'Khoj only, L15D'; }
+  return card('Customer quality at a glance', 'Customer quality at a glance', 'Khoj vs the same products on their own seller sites, each seller product weighted by Khoj\'s orders of it', kpiRow(cards) + missing);
 }
 
 // ---------- Rules ----------
@@ -1157,7 +1170,7 @@ function viewRules(d) {
     <div class="card-head"><div><h2 style="font-size:20px">Rules</h2><span class="muted small">Every decision and task follows these. Changes apply on save.</span></div>
       <div style="flex-direction:row;gap:8px"><button type="button" class="btn" id="resetRules">Reset to defaults</button><button type="submit" class="btn btn-primary" ${ui.saving ? 'disabled' : ''}>${ui.saving ? 'Saving…' : 'Save rules'}</button></div></div>
     ${Object.entries(groups).map(([g, fs]) => `<div><div class="group-title">${esc(g)}</div><div class="settings" style="margin-top:10px">${fs.map(([k, l]) => field(k, l)).join('')}${g === 'Ladder' ? ladderField : ''}</div></div>`).join('')}
-  </form>`;
+  </form>` + sourcesCard(d);
 }
 
 // ---------- events ----------
@@ -1187,7 +1200,7 @@ document.addEventListener('click', async (e) => {
   else if (t.dataset.live) { ui.live = t.dataset.live; remember(); render(); }
   else if (t.id === 'refresh' || t.id === 'retry') load(true, true);
   else if (t.id === 'resetPlan') {
-    if (!confirm('Reset the plan to the default placeholder?')) return;
+    if (!confirm('Reset the plan to the default targets?')) return;
     await fetch('/api/plan', { method: 'DELETE' });
     load(false);
   }
@@ -1216,10 +1229,12 @@ document.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target, v = (n) => Number(f.querySelector(`[name="${n}"]`)?.value);
     const P = ui.data.scaling.plan;
-    const body = { startWeek: f.querySelector('[name="startWeek"]').value.trim(), weeks: v('weeks'),
+    const sv = (n) => f.querySelector(`[name="${n}"]`)?.value.trim();
+    const milestones = P.milestones.map((_, i) => ({ date: sv(`m_date_${i}`), opd: v(`m_opd_${i}`) }));
+    const body = { version: 2, startWeek: sv('startWeek'), startOpd: v('startOpd'), milestones, targetSgmv: v('targetSgmv'), sgmvBand: [v('bandLo'), v('bandHi')],
       assumptions: { aov: v('a_aov'), successPct: v('a_successPct'), trialBudget: v('a_trialBudget'), trialDays: v('a_trialDays'), winnerDas: v('a_winnerDas'), winnerLifeWeeks: v('a_winnerLifeWeeks'),
-        sgmv: Object.fromEntries(['testing', 'winners', 'catalog', 'metaOther', 'google'].map((b) => [b, v('s_' + b)])) },
-      das: Object.fromEntries(['testing', 'catalog', 'metaOther', 'google'].map((b) => [b, P.das[b].map((_, i) => v(`d_${b}_${i}`) || 0)])) };
+        winnersShare: v('a_winnersShare'), googleShare: v('a_googleShare'), otherShare: v('a_otherShare'),
+        sgmv: { testing: v('s_testing'), winners: v('s_winners'), google: v('s_google'), metaOther: v('s_metaOther') } } };
     const res = await fetch('/api/plan', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     ui.note = res.ok ? 'Plan saved.' : ''; if (!res.ok) ui.msg = 'Could not save the plan.';
     await load(false);
