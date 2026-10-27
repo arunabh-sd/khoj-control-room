@@ -498,6 +498,10 @@ export function compute(src, s, history, today = todayIST()) {
   const finalReason = new Map();
   for (const d of [...history].reverse()) if (['kill', 'graduate', 'stopped'].includes(d.action)) { finalByAdset.set(d.adset_id, d.action); finalReason.set(d.adset_id, d.reason); }
   const lifecycleProducts = new Set(history.filter((d) => d.action === 'lifecycle').map((d) => d.product_id));
+  // Once a hit, always a hit: a trial that ever got a graduate verdict stays a winner even if it later slips;
+  // what happens next is tracked on the scale ladder, not by re-judging the trial.
+  const everGraduated = new Map();
+  for (const d of history) if (d.action === 'graduate' && !everGraduated.has(d.adset_id)) everGraduated.set(d.adset_id, d.reason);
 
   const tm = s.testingMatch.toLowerCase(), sm = s.scaleMatch.toLowerCase();
   const isTrial = (r) => String(r.campaign_name || '').toLowerCase().includes(tm);
@@ -528,10 +532,15 @@ export function compute(src, s, history, today = todayIST()) {
   const closedNow = [];
   for (const t of trials) {
     const d = decideTrial(t, s, ctx);
-    const prior = finalByAdset.get(t.id);
-    if (t.active) { t.decision = d; continue; }
+    const prior = everGraduated.has(t.id) ? 'graduate' : finalByAdset.get(t.id);
+    if (t.active) {
+      t.decision = everGraduated.has(t.id) && d.action !== 'graduate'
+        ? { action: 'graduate', reason: `Hit since its graduate verdict (${everGraduated.get(t.id)}); now tracked on the scale ladder`, locked: true }
+        : d;
+      continue;
+    }
     t.closed = true;
-    if (prior) t.decision = { action: prior === 'graduate' ? 'graduated' : prior === 'stopped' ? 'stopped' : 'killed', reason: finalReason.get(t.id) || 'Closed' };
+    if (prior) t.decision = { action: prior === 'graduate' ? 'graduated' : prior === 'stopped' ? 'stopped' : 'killed', reason: prior === 'graduate' ? (everGraduated.get(t.id) || finalReason.get(t.id) || 'Graduated') : (finalReason.get(t.id) || 'Closed') };
     else if (d.action === 'kill' || d.action === 'graduate') {
       t.decision = { action: d.action === 'kill' ? 'killed' : 'graduated', reason: d.reason + ' (ad sets already paused)' };
       closedNow.push({ t, action: d.action, reason: t.decision.reason });
@@ -684,7 +693,7 @@ export function compute(src, s, history, today = todayIST()) {
     recentSgmv: t.recent?.full ? t.recent.sgmv : null, recentSpend: t.recent?.full ? t.recent.spend : null, recentFrom: t.recent?.full ? t.recent.from : null,
     targetCpp: t.targetCpp, cpp: t.purchases ? t.spend / t.purchases : null,
     limit: t.extended ? s.extendedVerdictSpend : s.verdictSpend, extended: t.extended,
-    action: t.decision.action, reason: t.decision.reason, watch: !!t.decision.watch, active: t.active
+    action: t.decision.action, reason: t.decision.reason, watch: !!t.decision.watch, active: t.active, hit: !!t.decision.locked || ['graduate', 'graduated'].includes(t.decision.action)
   }));
   const ladderRows = scales.map((a) => ({
     id: a.id, name: a.name, product: a.product?.title || null, cat: a.cat, url: productUrl(a.product, s.khojBaseUrl),

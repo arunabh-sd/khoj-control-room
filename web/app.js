@@ -202,7 +202,7 @@ function viewRoom(d) {
     killReviewCard(d),
     ladderCard(d),
     catalogCard(d),
-    `<div class="split"><div class="main">${logCard(d)}</div><div class="side">${sourcesCard(d)}</div></div>`
+    sourcesCard(d)
   ].join('');
 }
 
@@ -249,7 +249,7 @@ function liveCard(d, trials) {
       : `<div class="num ${t.sgmv === null ? 'muted' : t.sgmv > bar ? 'bad' : 'good'}">${t.sgmv === null ? 'no orders' : pc(t.sgmv)}</div><div class="num small muted nowrap">${t.cpp !== null ? 'CPP ' + inr(t.cpp) + ' · ' : ''}target CPP ${inr(t.targetCpp)}</div>`}</td>
     <td class="r num ${t.ctr !== null && t.ctr < d.settings.minCtr ? 'bad' : ''}">${pc(t.ctr, 2)}</td>
     <td class="r num">${int(t.atc)}</td>
-    <td>${actionChip(t.action)}</td>
+    <td>${t.hit ? chip('green', 'Hit') : actionChip(t.action)}</td>
     <td class="wrap-cell small">${esc(t.reason)}</td></tr>`).join('');
   return `<section class="card" aria-label="Live trials">
     <div class="card-head"><div><h2>Trials</h2><span class="muted small">One product per trial (original + copy ad sets summed) · verdict at ${inr(d.settings.verdictSpend)} on the better of lifetime and recent Spend/GMV (recent = last ${Math.round(d.settings.verdictWindowShare * 100)}% of spend, min ${inr(d.settings.verdictWindowMin)}) · winning bar ${bar}% Spend/GMV after the ×${d.settings.metaSgmvFactor} Meta correction</span></div>
@@ -325,14 +325,6 @@ function killReviewCard(d) {
     <div class="card-head"><div><h2>Kill review</h2><span class="muted small">Every closed trial that didn't graduate, judged on the data at the stop and the product's spend across all campaigns after it</span></div>${chip(right === rows.length ? 'green' : 'amber', `${right} of ${rows.length} right`)}</div>
     <div class="table-box"><table style="min-width:1100px"><thead><tr><th>Product</th><th>Call</th><th class="r">Spend at stop</th><th class="r">Lifetime</th><th class="r">Recent</th><th class="r">Last half</th><th class="r">After stop</th><th>Verdict</th><th>Why</th></tr></thead><tbody>${body}</tbody></table></div>
     <p class="small muted">Right: worse than ${d.settings.retestMax}% Spend/GMV on both lifetime and recent, and not improving. Recheck: the last half of spend was inside ${d.settings.retestMax}% when it was stopped before ${inr(d.settings.verdictSpend)}. Premature: in the ${d.settings.winBar}–${d.settings.retestMax}% retest band. Wrong: at or under ${d.settings.winBar}%, or did that well after the stop.</p>
-  </section>`;
-}
-
-function logCard(d) {
-  const items = d.log.filter((e) => !e.category || inCat(e.category)).slice(0, 60);
-  return `<section class="card" aria-label="Decision log">
-    <div class="card-head"><h2>Decision log</h2><span class="muted small">Every call the rules engine made, and why</span></div>
-    ${items.length ? `<ul class="log">${items.map((e) => `<li><span class="num muted">${fmtDate(e.at)}</span><span>${actionChip(e.action)}</span><span><strong>${esc(e.product_name || e.adset_id)}</strong> <span class="muted">· ${esc(e.reason || '')}</span></span></li>`).join('')}</ul>` : '<p class="empty">No decisions yet.</p>'}
   </section>`;
 }
 
@@ -784,7 +776,7 @@ function viewCross(d) {
 }
 
 // ---------- Charts (inline SVG, no library) ----------
-function chartSvg({ labels, bars = null, lines = [], refLine = null, height = 180, yFmt = (v) => v, barColor = 'var(--blue)', barLabel = '', yCap = null }) {
+function chartSvg({ labels, bars = null, lines = [], refLine = null, height = 180, yFmt = (v) => v, barColor = 'var(--blue)', barColors = null, barOpacity = 0.28, barLabel = '', yCap = null }) {
   const W = 760, H = height, pl = 44, pr = 12, pt = 12, pb = 26;
   const n = labels.length; if (!n) return '';
   const vals = [...(bars || []), ...lines.flatMap((l) => l.values), ...(refLine ? [refLine.value] : [])].filter((v) => v !== null && Number.isFinite(v));
@@ -794,7 +786,7 @@ function chartSvg({ labels, bars = null, lines = [], refLine = null, height = 18
   const bw = Math.max(2, ((W - pl - pr) / n) * 0.62);
   const ticks = [0, 0.5, 1].map((f) => max * f / 1.12);
   const grid = ticks.map((v) => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${pl - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${esc(yFmt(v))}</text>`).join('');
-  const barsSvg = bars ? bars.map((v, i) => v === null ? '' : `<rect x="${x(i) - bw / 2}" y="${y(v)}" width="${bw}" height="${Math.max(0, H - pb - y(v))}" rx="2" fill="${barColor}" opacity=".28"><title>${esc(labels[i])}: ${esc(yFmt(v))} ${esc(barLabel)}</title></rect>`).join('') : '';
+  const barsSvg = bars ? bars.map((v, i) => v === null ? '' : `<rect x="${x(i) - bw / 2}" y="${y(v)}" width="${bw}" height="${Math.max(0, H - pb - y(v))}" rx="2" fill="${barColors?.[i] || barColor}" opacity="${barOpacity}"><title>${esc(labels[i])}: ${esc(yFmt(v))} ${esc(barLabel)}</title></rect>`).join('') : '';
   const linesSvg = lines.map((l) => {
     const pts = l.values.map((v, i) => (v === null || !Number.isFinite(v) ? null : `${x(i)},${y(v)}`)).filter(Boolean);
     return `<polyline points="${pts.join(' ')}" fill="none" stroke="${l.color}" stroke-width="${l.width || 2}" ${l.dash ? 'stroke-dasharray="4 3"' : ''} stroke-linejoin="round"/>` + (l.dots ? l.values.map((v, i) => (v === null ? '' : `<circle cx="${x(i)}" cy="${y(v)}" r="2.5" fill="${l.color}" opacity=".55"><title>${esc(labels[i])}: ${esc(yFmt(v))}</title></circle>`)).join('') : '');
@@ -879,6 +871,7 @@ function viewStatus(d) {
     ['Success rate', wins + losses ? pc(wins / (wins + losses) * 100) : '—', 'winners ÷ decided trials'],
     ['New to ShopDeck', pc(d.customers?.audience?.newToSdPct, 1), 'of Khoj buyers'],
     ['Back within 14 days', w14?.eligible ? pc(w14.pct, 1) : '—', b14 !== undefined && b14 !== null ? `parent sellers: ${pc(b14, 1)}` : ''],
+    ['Repeat Khoj orders paid online', pc(rp?.payment?.repeatOnlinePct, 1), rp?.payment ? `first orders: ${pc(rp.payment.firstOnlinePct, 1)}` : ''],
     ['Orders predictable (30 days)', pers ? pc((pers.browsing?.levels.find((x) => x.key === 'all_any') || pers.levels.find((x) => x.key === 'any'))?.d30, 1) : '—', 'from ShopDeck history']
   ]) + `<p class="small"><button type="button" class="btn" data-tab="pmf">Open the PMF View</button></p>`);
 
@@ -892,56 +885,104 @@ function viewStatus(d) {
 }
 
 // ---------- Scaling Plan & Status ----------
+// Orders are the scaling metric: everything here leads with orders per day against plan, coloured
+// green (on or above plan), amber (within 10%) or red (more than 10% behind).
+const TONE = { good: 'var(--green)', warn: 'var(--amber)', bad: 'var(--orange)', muted: 'var(--line)' };
+const toneOf = (a, p, lower = false) => {
+  if (a === null || a === undefined || !Number.isFinite(a) || !p) return 'muted';
+  const r = a / p;
+  return lower ? (r <= 1 ? 'good' : r <= 1.1 ? 'warn' : 'bad') : (r >= 1 ? 'good' : r >= 0.9 ? 'warn' : 'bad');
+};
+const TONE_WORD = { good: 'On plan', warn: 'Slightly behind', bad: 'Behind plan', muted: 'No data yet' };
 function viewPlan(d) {
   const S = d.scaling;
   if (!S) return '';
   const P = S.plan, A = P.assumptions, L = S.labels;
-  const pa = (a, p, f, cls) => {   // actual over plan
-    const av = a === null || a === undefined ? null : a, pv = p === null || p === undefined ? null : p;
-    if (av === null && pv === null) return '—';
-    if (av === null) return `<span class="muted">${f(pv)}</span>`;
-    return `<div class="${cls ? cls(av, pv) : ''}">${f(av)}</div>${pv !== null ? `<div class="muted small">plan ${f(pv)}</div>` : ''}`;
-  };
-  const hi = (av, pv) => (pv ? (av >= pv * 0.9 ? 'good' : 'bad') : '');
-  const lo = (av, pv) => (pv ? (av <= pv * 1.1 ? 'good' : 'bad') : '');
-  const col = (h, get, f, cls) => ({ h, r: 1, v: (r) => {
-    const pv = r.plan ? get(r.plan) : null;
-    if (!r.actual) return pv === null || pv === undefined ? '—' : `<span class="muted">${f(pv)}</span>`;
-    const av = get(r.actual);
-    if (av === null || av === undefined || !Number.isFinite(av)) return `<div class="muted">—</div>${pv !== null && pv !== undefined ? `<div class="muted small">plan ${f(pv)}</div>` : ''}`;
-    return pa(av, pv, f, cls);
-  } });
-  const k = (v) => (v === null || v === undefined ? '—' : v >= 1000 ? `₹${(v / 1000).toFixed(1)}k` : inr(v));
-  const p1 = (v) => (v === null || v === undefined ? '—' : `${v.toFixed(0)}%`);
-  const n0 = (v) => (v === null || v === undefined ? '—' : Math.round(v).toLocaleString('en-IN'));
+  const k = (v) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : Math.abs(v) >= 1000 ? `₹${(v / 1000).toFixed(1)}k` : inr(v));
+  const p1 = (v) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : `${v.toFixed(0)}%`);
+  const n0 = (v) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : Math.round(v).toLocaleString('en-IN'));
   const rows = S.rows;
-  const table = tbl([
-    { h: 'Week', v: (r) => `<strong>${shortDate(r.week)}</strong>${r.current ? ' ' + chip('blue', 'now') : ''}${r.actual?.partial ? `<div class="muted small">${r.actual.days} days so far</div>` : ''}` },
-    col('DAS total', (x) => x.das.total, k, hi), col('DAS Meta', (x) => x.das.meta, k), col('DAS Google', (x) => x.das.google, k),
-    col('DAS Meta catalog', (x) => x.das.catalog, k), col('DAS Meta winners', (x) => x.das.winners, k), col('DAS testing', (x) => x.das.testing, k),
-    col('S/GMV catalog', (x) => x.sgmv.catalog, p1, lo), col('S/GMV winners', (x) => x.sgmv.winners, p1, lo), col('S/GMV testing', (x) => x.sgmv.testing, p1, lo), col('S/GMV Google', (x) => x.sgmv.google, p1, lo),
-    col('S/GMV overall', (x) => x.sgmv.overall, p1, lo), col('GMV / day', (x) => x.gmvPerDay, k, hi), col('AOV', (x) => x.aov, inr, hi), col('Orders / day', (x) => x.ordersPerDay, n0, hi),
-    col('Tested (lifetime)', (x) => x.testing.tested, n0, hi), col('In testing', (x) => x.testing.inTesting, n0, hi), col('Winners', (x) => x.testing.winners, n0, hi), col('Killed', (x) => x.testing.killed, n0),
-    col('Success %', (x) => x.testing.successPct, p1, hi)
-  ], rows, { min: 1900 });
-  const cur = rows.find((r) => r.current);
-  const statusKpis = cur ? kpiRow([
-    ['Daily spend', `${k(cur.actual?.das.total)} <span class="muted small">/ ${k(cur.plan?.das.total)}</span>`, 'actual / plan, this week'],
-    ['Orders / day', `${n0(cur.actual?.ordersPerDay)} <span class="muted small">/ ${n0(cur.plan?.ordersPerDay)}</span>`, 'actual / plan'],
-    ['GMV / day', `${k(cur.actual?.gmvPerDay)} <span class="muted small">/ ${k(cur.plan?.gmvPerDay)}</span>`, 'actual / plan'],
-    ['Spend / GMV', `${p1(cur.actual?.sgmv.overall)} <span class="muted small">/ ${p1(cur.plan?.sgmv.overall)}</span>`, 'actual / plan'],
-    ['Winners (lifetime)', `${n0(cur.actual?.testing.winners)} <span class="muted small">/ ${n0(cur.plan?.testing.winners)}</span>`, 'actual / plan']
-  ]) : '';
-  const checks = tbl([
-    { h: 'Assumption', v: (c) => `${esc(c.label)}${c.note ? ` <span class="muted small">${esc(c.note)}</span>` : ''}` },
-    { h: 'Plan', r: 1, v: (c) => (c.assumed === null ? '—' : c.unit === '₹' ? inr(c.assumed) : `${Math.round(c.assumed)}${c.unit}`) },
-    { h: 'Actual', r: 1, v: (c) => (c.actual === null || c.actual === undefined ? '—' : c.unit === '₹' ? inr(c.actual) : `${c.actual.toFixed(c.unit === '%' ? 1 : 0)}${c.unit}`) },
-    { h: 'Holding?', r: 1, v: (c) => (c.ok === null ? '<span class="muted small">no data yet</span>' : c.ok ? chip('green', 'On track') : chip('orange', 'Off plan')) }
-  ], S.checks);
-  const where = card('Where we are', `Where we are · week of ${shortDate(S.currentWeek)}`, 'Actual against plan this week, whether the plan\'s assumptions are holding, and what could stop the plan', statusKpis +
-    `<div class="grid-2"><div><div class="group-title">Assumptions</div><div style="margin-top:8px">${checks}</div></div><div><div class="group-title">Risks to the plan</div>${S.risks.length ? `<ul class="small" style="margin:8px 0 0;padding-left:18px;line-height:1.6">${S.risks.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : '<p class="small muted">None flagged.</p>'}</div></div>`);
-  const weekCard = card('Week-wise plan', 'Week-wise plan and actuals', 'Each cell: actual (green on/above plan, orange behind) with the plan underneath; future weeks show the plan. DAS = daily average spend. Meta S/GMV per bucket is Meta-reported (×' + d.settings.metaSgmvFactor + ' correction) and over-counts across buckets; overall S/GMV is actual orders. Google = day-wise total spend − Meta spend.', table);
-  // Editor
+  const cur = rows.find((r) => r.current) || rows.filter((r) => r.actual).at(-1);
+  const ca = cur?.actual, cp = cur?.plan;
+
+  // 1. Headline: orders per day this week vs plan.
+  const t = toneOf(ca?.ordersPerDay, cp?.ordersPerDay);
+  const pctOf = ca?.ordersPerDay !== undefined && cp?.ordersPerDay ? (ca.ordersPerDay / cp.ordersPerDay) * 100 : null;
+  const C = S.cum;
+  const cumT = C ? toneOf(C.actual, C.plan) : 'muted';
+  const sub = (a, p, f, lower = false, label = '') => { const tt = toneOf(a, p, lower); return `<div class="plan-mini plan-${tt}"><span class="label">${esc(label)}</span><span class="value num">${f(a)}</span><span class="sub">plan ${f(p)}</span></div>`; };
+  const G = S.gap;
+  const gapLine = G && Math.abs(G.delta) >= 1 ? `<p class="small" style="margin:0">${G.delta < 0 ? 'Behind' : 'Ahead'} by <strong>${n0(Math.abs(G.delta))} orders a day</strong>: ${G.rows.map((r) => `${esc(r.label)} <span class="${r.orders >= 0 ? 'good' : 'bad'}">${r.orders >= 0 ? '+' : '−'}${n0(Math.abs(r.orders))}</span>`).join(' · ')}</p>` : '';
+  const head = card('Orders vs plan', `Orders vs plan · week of ${shortDate(cur?.week)}`, ca?.partial ? `${ca.days} days so far this week, per-day averages` : '',
+    `<div class="plan-hero plan-${t}">
+       <div><span class="label">Orders per day</span><span class="big num">${n0(ca?.ordersPerDay)}</span><span class="small">plan ${n0(cp?.ordersPerDay)}${pctOf !== null ? ` · <strong>${pctOf.toFixed(0)}% of plan</strong>` : ''}</span></div>
+       <div class="plan-verdict">${esc(TONE_WORD[t])}</div>
+       ${C ? `<div><span class="label">Orders since the plan started</span><span class="big num" style="font-size:26px">${n0(C.actual)}</span><span class="small">plan ${n0(C.plan)} · <span class="${cumT === 'bad' ? 'bad' : cumT === 'warn' ? 'warn' : 'good'}">${C.plan ? ((C.actual / C.plan) * 100).toFixed(0) : '—'}%</span> over ${C.weeks} week${C.weeks > 1 ? 's' : ''}</span></div>` : ''}
+     </div>` + gapLine +
+    `<div class="plan-minis">${[
+      sub(ca?.gmvPerDay, cp?.gmvPerDay, k, false, 'GMV / day'),
+      sub(ca?.das.total, cp?.das.total, k, false, 'Spend / day'),
+      sub(ca?.sgmv.overall, cp?.sgmv.overall, p1, true, 'Spend / GMV'),
+      sub(ca?.aov, cp?.aov, inr, false, 'AOV'),
+      sub(ca?.testing.winners, cp?.testing.winners, n0, false, 'Winners (lifetime)'),
+      sub(ca?.testing.inTesting, cp?.testing.inTesting, n0, false, 'Trials running')
+    ].join('')}</div>`);
+
+  // 2. Week strip: one tile per week, coloured by orders vs plan.
+  const strip = `<div class="week-strip">${rows.map((r) => {
+    const tt = r.actual ? toneOf(r.actual.ordersPerDay, r.plan?.ordersPerDay) : 'future';
+    const a = r.actual?.ordersPerDay, p = r.plan?.ordersPerDay;
+    return `<div class="wk wk-${tt}${r.current ? ' wk-now' : ''}" title="${esc(shortDate(r.week))}: ${n0(a)} orders/day vs ${n0(p)} planned"><span class="small">${esc(shortDate(r.week))}</span><span class="num"><strong>${r.actual ? n0(a) : '·'}</strong></span><span class="small">${p ? `of ${n0(p)}` : 'no plan'}</span></div>`;
+  }).join('')}</div>`;
+
+  // 3. Charts.
+  const lab = rows.map((r) => shortDate(r.week));
+  const bars = (f) => rows.map((r) => (r.actual ? f(r.actual) ?? null : null));
+  const plan = (f) => rows.map((r) => (r.plan ? f(r.plan) ?? null : null));
+  const tones = (f, lower) => rows.map((r) => TONE[r.actual ? toneOf(f(r.actual), r.plan ? f(r.plan) : null, lower) : 'muted']);
+  const charts = card('Weekly charts', 'Week by week against plan', 'Bars are actuals (per-day averages; colour = vs plan), the dashed line is the plan',
+    `<div class="grid-2">
+      <div><div class="group-title">Orders per day</div>${chartSvg({ labels: lab, bars: bars((x) => x.ordersPerDay), barColors: tones((x) => x.ordersPerDay), barOpacity: 0.85, lines: [{ values: plan((x) => x.ordersPerDay), color: 'var(--ink)', dash: true, dots: true }], yFmt: (v) => Math.round(v), barLabel: 'orders/day' })}${legend([['var(--ink)', 'plan', true]])}</div>
+      <div><div class="group-title">Spend per day (₹)</div>${chartSvg({ labels: lab, bars: bars((x) => x.das.total), barColors: tones((x) => x.das.total), barOpacity: 0.85, lines: [{ values: plan((x) => x.das.total), color: 'var(--ink)', dash: true, dots: true }], yFmt: (v) => `${Math.round(v / 1000)}k` })}${legend([['var(--ink)', 'plan', true]])}</div>
+      <div><div class="group-title">Spend / GMV</div>${chartSvg({ labels: lab, bars: bars((x) => x.sgmv.overall), barColors: tones((x) => x.sgmv.overall, true), barOpacity: 0.85, lines: [{ values: plan((x) => x.sgmv.overall), color: 'var(--ink)', dash: true, dots: true }], refLine: d.overview?.breakevenAdSgmv ? { value: d.overview.breakevenAdSgmv, label: `breakeven ~${d.overview.breakevenAdSgmv.toFixed(0)}%`, color: 'var(--green)' } : null, yFmt: (v) => `${Math.round(v)}%`, yCap: 80 })}${legend([['var(--ink)', 'plan', true], ['var(--green)', 'breakeven', true]])}</div>
+      <div><div class="group-title">Winners found (lifetime)</div>${chartSvg({ labels: lab, bars: bars((x) => x.testing.winners), barColors: tones((x) => x.testing.winners), barOpacity: 0.85, lines: [{ values: plan((x) => x.testing.winners), color: 'var(--ink)', dash: true, dots: true }], yFmt: (v) => Math.round(v) })}${legend([['var(--ink)', 'plan', true]])}</div>
+    </div>`);
+
+  // 4. Assumptions and risks, colour-coded.
+  const fmtC = (c, v) => (v === null || v === undefined ? '—' : c.unit === '₹' ? inr(v) : `${v.toFixed(c.unit === '%' ? 0 : 0)}${c.unit}`);
+  const checks = `<div class="checks">${S.checks.map((c) => `<div class="check check-${c.ok === null ? 'muted' : c.ok ? 'good' : 'bad'}"><span class="small">${esc(c.label)}</span><span class="num"><strong>${fmtC(c, c.actual)}</strong> <span class="muted small">plan ${fmtC(c, c.assumed)}</span></span></div>`).join('')}</div>`;
+  const risks = card('Plan assumptions', 'Are the plan\'s assumptions holding?', 'Green: holding · red: off by more than 10% · grey: no data yet', checks +
+    (S.risks.length ? `<div class="group-title" style="margin-top:4px">Risks to the plan</div><ul class="small" style="margin:0;padding-left:18px;line-height:1.6">${S.risks.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''));
+
+  // 5. Simple week table + full bucket detail (collapsed).
+  const cell = (r, f, fmt, lower = false) => {
+    const a = r.actual ? f(r.actual) : null, p = r.plan ? f(r.plan) : null;
+    if (!r.actual) return `<span class="muted">${p === null || p === undefined ? '—' : fmt(p)}</span>`;
+    return `<div class="${{ good: 'good', warn: 'warn', bad: 'bad', muted: '' }[toneOf(a, p, lower)]}">${fmt(a)}</div>${p !== null && p !== undefined ? `<div class="muted small">plan ${fmt(p)}</div>` : ''}`;
+  };
+  const simple = tbl([
+    { h: 'Week', v: (r) => `<strong>${shortDate(r.week)}</strong>${r.current ? ' ' + chip('blue', 'now') : ''}${r.actual?.partial ? `<div class="muted small">${r.actual.days} days ${r.current ? 'so far' : 'of data'}</div>` : ''}` },
+    { h: 'Orders / day', r: 1, v: (r) => cell(r, (x) => x.ordersPerDay, n0) },
+    { h: '% of plan', r: 1, v: (r) => { if (!r.actual || !r.plan?.ordersPerDay) return '<span class="muted">—</span>'; const tt = toneOf(r.actual.ordersPerDay, r.plan.ordersPerDay); return `<span class="chip chip-${{ good: 'green', warn: 'amber', bad: 'orange', muted: 'muted' }[tt]}">${((r.actual.ordersPerDay / r.plan.ordersPerDay) * 100).toFixed(0)}%</span>`; } },
+    { h: 'GMV / day', r: 1, v: (r) => cell(r, (x) => x.gmvPerDay, k) },
+    { h: 'Spend / day', r: 1, v: (r) => cell(r, (x) => x.das.total, k) },
+    { h: 'Spend / GMV', r: 1, v: (r) => cell(r, (x) => x.sgmv.overall, p1, true) },
+    { h: 'AOV', r: 1, v: (r) => cell(r, (x) => x.aov, inr) },
+    { h: 'Tested', r: 1, v: (r) => cell(r, (x) => x.testing.tested, n0) },
+    { h: 'Winners', r: 1, v: (r) => cell(r, (x) => x.testing.winners, n0) }
+  ], rows, { min: 900 });
+  const col = (h, get, f, lower) => ({ h, r: 1, v: (r) => cell(r, get, f, lower) });
+  const full = tbl([
+    { h: 'Week', v: (r) => `<strong>${shortDate(r.week)}</strong>` },
+    col('DAS total', (x) => x.das.total, k), col('DAS Meta', (x) => x.das.meta, k), col('DAS Google', (x) => x.das.google, k),
+    col(`DAS ${L.catalog}`, (x) => x.das.catalog, k), col(`DAS ${L.winners}`, (x) => x.das.winners, k), col(`DAS ${L.testing}`, (x) => x.das.testing, k), col(`DAS ${L.metaOther}`, (x) => x.das.metaOther, k),
+    col('S/GMV catalog', (x) => x.sgmv.catalog, p1, true), col('S/GMV winners', (x) => x.sgmv.winners, p1, true), col('S/GMV testing', (x) => x.sgmv.testing, p1, true),
+    col('In testing', (x) => x.testing.inTesting, n0), col('Killed', (x) => x.testing.killed, n0), col('Success %', (x) => x.testing.successPct, p1)
+  ], rows, { min: 1500 });
+  const weekCard = card('Week-wise plan', 'Week-wise plan and actuals', 'Actual on top (green on/above plan, amber within 10%, red behind), plan underneath; future weeks show the plan.', simple +
+    `<details><summary style="cursor:pointer;font-weight:600" class="small">Spend by bucket (Meta catalog, winners, testing, other, Google)</summary><p class="small muted" style="margin:8px 0">DAS = daily average spend. Meta S/GMV per bucket is Meta-reported (×${d.settings.metaSgmvFactor} correction) and over-counts across buckets; overall S/GMV uses actual orders. Google = day-wise total spend − Meta spend.</p>${full}</details>`);
+
+  // 6. Editor.
   const inp = (name, v, w = 90) => `<input name="${name}" value="${esc(v)}" inputmode="decimal" style="width:${w}px;min-height:34px;border:1px solid var(--line);border-radius:6px;padding:0 6px;background:var(--surface);color:inherit;font:inherit;font-size:13px">`;
   const planWeeks = rows.filter((r) => r.plan).map((r) => r.week);
   const das = ['testing', 'catalog', 'metaOther', 'google'];
@@ -953,10 +994,13 @@ function viewPlan(d) {
       <div class="table-box"><table style="min-width:${200 + planWeeks.length * 100}px"><thead><tr><th>Daily spend (₹)</th>${planWeeks.map((w) => `<th class="r">${shortDate(w)}</th>`).join('')}</tr></thead><tbody>
         ${das.map((b) => `<tr><td>${esc(L[b])}</td>${P.das[b].map((v, i) => `<td class="r">${inp(`d_${b}_${i}`, v, 84)}</td>`).join('')}</tr>`).join('')}
         <tr><td class="muted">Meta winners (from success % × trials)</td>${rows.filter((r) => r.plan).map((r) => `<td class="r muted small">${k(r.plan.das.winners)}</td>`).join('')}</tr>
+        <tr><td class="muted"><strong>Orders / day this gives</strong></td>${rows.filter((r) => r.plan).map((r) => `<td class="r small"><strong>${n0(r.plan.ordersPerDay)}</strong></td>`).join('')}</tr>
       </tbody></table></div>
       <div style="display:flex;gap:8px"><button type="submit" class="btn btn-primary">Save plan</button><button type="button" class="btn" id="resetPlan">Reset to default</button></div>
     </form></details>`;
-  return where + weekCard + card('Plan editor', 'The plan', P.saved ? 'Saved plan. Winners spend follows from the testing budget, success % and the winner budget.' : 'Default placeholder plan: set your weekly budgets and assumptions and save.', editor);
+  const noData = !rows.some((r) => r.actual && r.actual.ordersPerDay) ? `<div class="notice notice-amber">No orders from the day-wise question yet (Q16083), so actuals are blank. It's pulled every hour in the background; press Refresh after the next pull.</div>` : '';
+  return noData + head + card('Week strip', 'Orders per day, week by week', 'Green on or above plan · amber within 10% · red more than 10% behind · grey future', strip) + charts + risks + weekCard +
+    card('Plan editor', 'The plan', P.saved ? 'Saved plan. Spend is the input; orders follow from Spend/GMV and AOV, and the winners budget from the testing budget × success %.' : 'Default placeholder plan: set your weekly budgets and assumptions and save.', editor);
 }
 
 // ---------- PMF View ----------
@@ -976,49 +1020,110 @@ function viewPmf(d) {
   return bar + body;
 }
 
+// PMF summary: the theses Khoj has to prove, each with a clean "is it playing out?" call and the evidence behind it.
+const STATUS = {
+  yes: ['green', 'Playing out'], partly: ['amber', 'Partly'], no: ['orange', 'Not playing out'],
+  early: ['muted', 'Too early'], data: ['muted', 'Needs data'], model: ['blue', 'Modelled'], potential: ['blue', 'Shown, not yet used'], none: ['muted', 'Not started']
+};
+const stChip = (s) => chip(...STATUS[s]);
 function viewPmfSummary(d) {
+  const st = d.settings || {};
   const allK = Object.values(d.kpis || {});
   const S = (f) => allK.reduce((a, k) => a + (k[f] || 0), 0);
-  const wins = S('winners'), losses = S('losses'), tested = S('tested'), live = S('liveTrials'), scaling = S('scaling');
-  const sr = wins + losses ? wins / (wins + losses) * 100 : null;
-  const ci = wins + losses ? 1.96 * Math.sqrt((sr / 100) * (1 - sr / 100) / (wins + losses)) * 100 : null;
-  const U = d.universe?.byCat; const tc = U ? CATS.reduce((a, c) => ({ h: a.h + (U[c]?.hero || 0), l: a.l + (U[c]?.heroLive || 0) }), { h: 0, l: 0 }) : null;
-  const ladder = d.ladder || [];
+  const wins = S('winners'), losses = S('losses'), tested = S('tested'), live = S('liveTrials');
+  const decided = wins + losses;
+  const sr = decided ? (wins / decided) * 100 : null;
+  const ci = decided ? 1.96 * Math.sqrt((sr / 100) * (1 - sr / 100) / decided) * 100 : null;
+  const O = d.overview, PA = O?.pnl.all, P7 = O?.pnl.last7;
+  const snm = (p) => (p && p.nmv ? (p.mkt / p.nmv) * 100 : null);
   const a = d.customers?.audience, cmp = a?.compare;
-  const rp = d.customers?.repeat, RB = d.repeatBench;
-  const w7 = rp?.curves.find((c) => c.days === 7)?.khoj, w14 = rp?.curves.find((c) => c.days === 14)?.khoj;
+  const rp = d.customers?.repeat, RB = d.repeatBench, pay = rp?.payment;
+  const w14 = rp?.curves.find((c) => c.days === 14)?.khoj, b14 = RB?.rates?.d14;
   const M = d.sessions?.matched, MM = M ? Object.fromEntries(M.metrics.map((m) => [m.key, m])) : {};
   const B = d.sessions?.beyond;
   const pers = a?.personalisation, V = d.visitorPersonalisation;
-  const verdict = (ok, warn) => (ok === null ? chip('muted', 'Waiting for data') : ok ? chip('green', 'Encouraging') : warn ? chip('amber', 'Watch') : chip('orange', 'Concern'));
-  const section = (sub, title, v, cards, line) => `<section class="card" aria-label="${esc(title)}"><div class="card-head"><div><h2>${esc(title)}</h2>${line ? `<span class="muted small">${esc(line)}</span>` : ''}</div><div style="flex-direction:row;gap:8px;align-items:center">${v}<button type="button" class="btn" data-sub="${sub}" style="min-height:32px;padding:4px 10px;font-size:12px">Open</button></div></div>${kpiRow(cards)}</section>`;
-  const repOk = w14?.eligible && RB?.rates?.d14 !== null && RB?.rates?.d14 !== undefined ? w14.pct >= RB.rates.d14 * 0.9 : null;
-  const crossOk = MM.productsPerSession?.khoj !== undefined && MM.productsPerSession?.bench ? MM.productsPerSession.khoj >= MM.productsPerSession.bench * 0.9 : null;
   const anyPred = pers ? (pers.browsing?.levels.find((x) => x.key === 'all_any') || pers.levels.find((x) => x.key === 'any')) : null;
-  return [
-    section('hits', 'Hit % & Scalability', verdict(sr === null ? null : sr >= 40, sr >= 25), [
-      ['Products tested', int(tested), `${int(live)} in testing now`], ['Success rate', pc(sr), sr !== null ? `${wins} of ${wins + losses} decided · ±${Math.round(ci)} pts` : 'no verdicts yet'],
-      ['Winners scaling', int(scaling), `${ladder.length} scale ad sets`], ['Hero coverage (test categories)', tc && tc.h ? pc(tc.l / tc.h * 100, 1) : '—', tc ? `${int(tc.l)} of ${int(tc.h)} ShopDeck heroes live` : '']
-    ], 'Do hero products win at a useful rate, and how far do winners scale?'),
-    section('quality', 'Customer Quality', verdict(cmp ? cmp.khoj.rtoPct <= cmp.shopdeckBefore.rtoPct : null, true), [
-      ['New to ShopDeck', pc(a?.newToSdPct, 1), 'of Khoj buyers'], ['Online orders', pc(100 - (cmp?.khoj.codPct ?? NaN), 1), cmp ? `same customers on sellers: ${pc(100 - cmp.shopdeckBefore.codPct, 1)}` : ''],
-      ['RTO', pc(cmp?.khoj.rtoPct, 1), cmp ? `same customers on sellers: ${pc(cmp.shopdeckBefore.rtoPct, 1)}` : ''], ['Cancelled', pc(cmp?.khoj.cancelPct, 1), cmp ? `on sellers: ${pc(cmp.shopdeckBefore.cancelPct, 1)}` : '']
-    ], 'Who buys, and are they better customers than on seller sites?'),
-    `<section class="card" aria-label="Early signs"><div class="card-head"><div><h2>Early signs on repeats &amp; likability</h2><span class="muted small">Leading signals of repeat: to come</span></div>${chip('muted', 'To come')}</div></section>`,
-    section('repeat', 'Actual Repeats', verdict(repOk, true), [
-      ['Back within 7 days', w7?.eligible ? pc(w7.pct, 1) : '—', RB ? `parent sellers: ${pc(RB.rates.d7, 1)}` : ''], ['Back within 14 days', w14?.eligible ? pc(w14.pct, 1) : '—', RB ? `parent sellers: ${pc(RB.rates.d14, 1)}` : ''],
-      ['Repeat from another seller', rp?.kinds.lines ? pc(rp.kinds.otherParent / rp.kinds.lines * 100) : '—', 'of repeat order lines'], ['Repeat buyers so far', int(rp?.repeaters), `of ${int(rp?.customers)}`]
-    ], 'Do Khoj buyers come back, and as often as on the sellers\' own sites?'),
-    section('cross', 'Cross Selling', verdict(crossOk, true), [
-      ['Products viewed / session', MM.productsPerSession ? `${MM.productsPerSession.khoj?.toFixed(2)} vs ${MM.productsPerSession.bench?.toFixed(2)}` : '—', 'Khoj vs same first products on seller sites'],
-      ['Sessions seeing only the first product', MM.singlePct ? `${pc(MM.singlePct.khoj)} vs ${pc(MM.singlePct.bench)}` : '—', ''],
-      ['Buy-now on a different product', pc(B?.otherPct, 1), 'than the one they landed on'], ['…from another seller', pc(B?.otherAnotherSellerPct, 1), 'of those']
-    ], 'Does an all-hero marketplace get people to look and buy beyond the ad\'s product?'),
-    section('data', 'Using ShopDeck\'s data advantage', verdict(anyPred ? anyPred.d30 >= 30 : null, true), [
-      ['Orders predictable, last 7 days', pc(anyPred?.d7, 1), 'from orders and browsing on ShopDeck'], ['Orders predictable, last 30 days', pc(anyPred?.d30, 1), ''],
-      ['Visitors identifiable at landing', pc(V?.linkedPct, 1), 'could be personalised'], ['Conversion if personalised', V?.estimate?.conservative ? `${pc(V.conversionPct, 2)} → ${pc(V.estimate.conservative.newConversionPct, 2)}` : '—', 'upper bound']
-    ], 'Can ShopDeck\'s history tell us what a visitor will buy?')
-  ].join('');
+  const U = d.universe ? Object.values(d.universe.byCat) : null;
+  const uHero = U ? U.reduce((x, c) => x + (c.hero || 0), 0) : null, uAll = U ? U.reduce((x, c) => x + (c.all || 0), 0) : null;
+  const testSpend = (d.trials || []).reduce((x, t) => x + (t.spend || 0), 0);
+  const f1 = (v, dd = 1) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(dd));
+
+  // ---- Thesis 1: lower cost of doing business ----
+  const kSn = snm(PA) ?? snm(P7), kSn7 = snm(P7), baseSn = st.baseSpendNmv || null;
+  const t1 = kSn === null || !baseSn ? 'data' : kSn <= baseSn ? 'yes' : kSn <= baseSn * 1.15 ? 'partly' : 'no';
+
+  const baseHit = st.baseHitPct || (uAll ? (uHero / uAll) * 100 : null);
+  const hitS = sr === null ? 'data' : !st.baseHitPct ? 'data' : decided < 10 ? 'early' : sr >= baseHit * 1.5 ? 'yes' : sr >= baseHit ? 'partly' : 'no';
+  const qOnline = cmp ? 100 - cmp.khoj.codPct : null, qOnlineB = cmp ? 100 - cmp.shopdeckBefore.codPct : null;
+  const qRto = cmp?.khoj.rtoPct, qRtoB = cmp?.shopdeckBefore.rtoPct;
+  const qWins = cmp ? [qRto <= qRtoB, qOnline >= qOnlineB, cmp.khoj.cancelPct <= cmp.shopdeckBefore.cancelPct].filter(Boolean).length : null;
+  const qS = cmp ? (qWins === 3 ? 'yes' : qWins >= 1 ? 'partly' : 'no') : 'data';
+  const rS = !rp || b14 === null || b14 === undefined ? 'data' : !w14?.eligible ? 'early' : w14.eligible < 100 ? 'early' : w14.pct >= b14 ? 'yes' : w14.pct >= b14 * 0.8 ? 'partly' : 'no';
+  const conv = MM.ordersPerSession, pps = MM.productsPerSession;
+  const cS = !conv || conv.khoj === null || !conv.bench ? 'data' : conv.khoj >= conv.bench && pps?.khoj >= pps?.bench ? 'yes' : conv.khoj >= conv.bench || pps?.khoj >= pps?.bench ? 'partly' : 'no';
+  const dS = anyPred ? (anyPred.d30 >= 25 ? 'potential' : 'partly') : 'data';
+
+  const row = (status, claim, ev, sub) => `<div class="thesis-row"><div>${stChip(status)}</div><div class="claim">${esc(claim)}</div><div class="ev">${ev}</div><div>${sub ? `<button type="button" class="btn" data-sub="${sub}" style="min-height:30px;padding:2px 10px;font-size:12px">Open</button>` : ''}</div></div>`;
+  const vs = (k2, b, unit = '%', dd = 1) => `<strong>${f1(k2, dd)}${unit}</strong> Khoj vs <strong>${f1(b, dd)}${unit}</strong>`;
+  const subs1 = [
+    row(hitS, 'Lower wasted spend in finding hits (step-higher hit %)',
+      sr === null ? 'No trial verdicts yet.' : `${st.baseHitPct ? `Hit rate ${vs(sr, baseHit, '%', 0)} base sellers.` : `Khoj hit rate <strong>${pc(sr, 0)}</strong>. Base sellers' hit rate on products they advertise isn't measured yet: set it in Rules → PMF benchmarks.${baseHit ? ` For context, ${pc(baseHit, 1)} of ShopDeck PQ ≥ 3 listings clear the hero bar (not like for like: most listings are never advertised).` : ''}`} ${wins} hits from ${decided} decided trials (±${Math.round(ci)} pts), ${live} still testing. Testing spend per hit: <strong>${wins ? inr(testSpend / wins) : '—'}</strong>.${decided < 10 ? ' Fewer than 10 verdicts, so the rate can still swing a lot.' : ''}`, 'hits'),
+    row(qS, 'Better customer quality than base sellers',
+      cmp ? `Same customers, Khoj vs their orders on seller sites: RTO ${vs(qRto, qRtoB)} · online ${vs(qOnline, qOnlineB)} · cancelled ${vs(cmp.khoj.cancelPct, cmp.shopdeckBefore.cancelPct)}.${pay ? ` Repeat Khoj orders paid online: <strong>${pc(pay.repeatOnlinePct, 1)}</strong> (first orders ${pc(pay.firstOnlinePct, 1)}).` : ''}` : 'Needs the Khoj buyers\' order history (Q16717).', 'quality'),
+    row(rS, 'Better repeat rate than base sellers',
+      w14?.eligible && (b14 === null || b14 === undefined) ? `Back within 14 days: <strong>${pc(w14.pct, 1)}</strong> Khoj. The parent-seller benchmark (Q16725) hasn't loaded yet.` : w14?.eligible ? `Back within 14 days: ${vs(w14.pct, b14)} parent sellers (order-weighted), on ${int(w14.eligible)} buyers old enough to count.${w14.eligible < 100 ? ' Under 100 buyers, so early.' : ''}` : 'Not enough buyers 14+ days past their first order yet.', 'repeat'),
+    row(cS, 'Better website conversion from more cross-selling',
+      conv ? `Orders per 100 sessions ${vs(conv.khoj, conv.bench, '', 2)} the same first products on seller sites · products viewed per session ${vs(pps?.khoj, pps?.bench, '', 2)}.${B?.otherPct !== undefined ? ` ${pc(B.otherPct, 1)} of buy-now clicks are on a different product than the one landed on.` : ''}` : 'Needs the site sessions question (Q16724).', 'cross'),
+    row(dS, 'ShopDeck\'s data advantage',
+      anyPred ? `<strong>${pc(anyPred.d30, 1)}</strong> of Khoj orders were predictable from the buyer's ShopDeck orders and browsing in the 30 days before. ${V ? `${pc(V.linkedPct, 1)} of visitors are identifiable at landing; personalising them could take conversion from ${pc(V.conversionPct, 2)} to ~${pc(V.estimate?.conservative?.newConversionPct, 2)}.` : ''} Not used on the site yet.` : 'Needs the browsing and personalisation questions.', 'data')
+  ];
+  const counts = (list) => { const c = { yes: 0, partly: 0, no: 0 }; for (const s of list) if (c[s] !== undefined) c[s]++; return c; };
+  const c1 = counts([hitS, qS, rS, cS]);
+  const sec1 = `<section class="card" aria-label="Lower cost of doing business"><div class="card-head"><div><h2>1 · Lower cost of doing business</h2><span class="muted small">Thesis: Khoj sells at a lower Spend/NMV than base sellers, because each of the drivers below is better</span></div>${stChip(t1)}</div>
+    <div class="thesis-head plan-${{ yes: 'good', partly: 'warn', no: 'bad' }[t1] || ''}">
+      <div><div class="small muted">Khoj Spend / NMV (P&amp;L marketing ÷ NMV, since launch)</div><div class="big num">${pc(kSn, 1)}</div><div class="small">last 7 days ${pc(kSn7, 1)}</div></div>
+      <div><div class="small muted">Base sellers</div><div class="big num">${baseSn ? pc(baseSn, 0) : '—'}</div><div class="small">set in Rules → PMF benchmarks</div></div>
+      <div class="small" style="max-width:420px">${t1 === 'data' ? 'Needs the P&amp;L question (Q16167).' : kSn <= baseSn ? `Playing out: Khoj spends ${f1(baseSn - kSn)} pts less per rupee of NMV than base sellers.` : `${t1 === 'partly' ? 'Close, not there yet' : 'Not playing out yet'}: Khoj spends ${f1(kSn - baseSn)} pts more per rupee of NMV than base sellers.${kSn7 !== null && kSn7 < kSn ? ` The last 7 days (${pc(kSn7, 1)}) are better than the average since launch.` : ''}`} Drivers: ${c1.yes} playing out, ${c1.partly} partly, ${c1.no} not.</div>
+    </div>
+    <div class="thesis-rows">${subs1.join('')}</div></section>`;
+
+  // ---- Thesis 2: scalability ----
+  const winnersPerDay = O?.last7.ordersPerDay && wins ? O.last7.ordersPerDay / wins : null;
+  const A = d.scaling?.plan.assumptions;
+  const planPerHit = A && A.sgmv.winners && A.aov ? A.winnerDas / (A.sgmv.winners / 100) / A.aov : null;
+  const perHit = st.ordersPerHitPerDay || planPerHit || winnersPerDay;
+  const perHitNote = st.ordersPerHitPerDay ? 'set in Rules' : planPerHit ? `plan: ₹${int(A.winnerDas)}/day per hit at ${A.sgmv.winners}% S/GMV, ₹${int(A.aov)} AOV${winnersPerDay ? ` (all orders ÷ hits today: ${f1(winnersPerDay, 0)})` : ''}` : `today: ${f1(O.last7.ordersPerDay, 0)} orders/day ÷ ${wins} hits`;
+  const ctrl = (d.bySource || []).find((x) => x.key === 'control');
+  const ctrlSr = ctrl && ctrl.decided >= 5 ? (ctrl.winners / ctrl.decided) * 100 : null;
+  const uSr = ctrlSr ?? st.unexploredSuccessPct ?? null;
+  const uSrNote = ctrlSr !== null ? `control trials: ${ctrl.winners} of ${ctrl.decided}` : 'assumed (Rules); not enough control trials yet';
+  const ceil1 = uHero && sr !== null && perHit ? uHero * (sr / 100) * perHit : null;
+  const unexplored = uAll !== null ? uAll - uHero : null;
+  const ceil2 = unexplored && uSr && perHit ? unexplored * (uSr / 100) * perHit : null;
+  const now = O?.last7.ordersPerDay;
+  const term = (label, v, note, cls = '') => `<div class="term ${cls}"><span class="small muted">${esc(label)}</span><span class="num">${v}</span><span class="small muted">${esc(note)}</span></div>`;
+  const formula = (parts, result) => `<div class="formula">${parts.map((p, i) => (i ? '<span class="op">×</span>' : '') + p).join('')}<span class="op">=</span>${result}</div>`;
+  const sec2 = `<section class="card" aria-label="Scalability"><div class="card-head"><div><h2>2 · Scalability</h2><span class="muted small">Thesis: the hit model has a ceiling far above today, inside ShopDeck and beyond it</span></div>${stChip(ceil1 ? 'model' : 'data')}</div>
+    <div class="thesis-rows">
+      <div class="thesis-row"><div>${stChip(ceil1 ? 'model' : 'data')}</div><div class="claim">Theoretical ceiling<div class="small muted" style="font-weight:400">Hits universe × success rate × scalability per hit</div></div><div class="ev">${formula([
+        term('ShopDeck heroes', int(uHero), uHero !== null ? `${int(S('universeHeroLive') || S('heroLive'))} already live on Khoj` : 'needs the universe question'),
+        term('Khoj success rate', pc(sr, 0), decided ? `${wins} of ${decided} decided` : 'no verdicts yet'),
+        term('Orders/day per hit', f1(perHit, 1), perHitNote)
+      ], term('Ceiling, orders/day', int(ceil1), now ? `${ceil1 ? (ceil1 / now).toFixed(0) : '—'}× today's ${int(now)}` : '', 'result'))}</div><div><button type="button" class="btn" data-sub="hits" style="min-height:30px;padding:2px 10px;font-size:12px">Open</button></div></div>
+      <div class="thesis-row"><div>${stChip(ceil2 ? 'model' : 'data')}</div><div class="claim">Added ceiling<div class="small muted" style="font-weight:400">Listed on ShopDeck but unexplored × success rate × scalability</div></div><div class="ev">${formula([
+        term('Listed, not yet heroes', int(unexplored), 'ShopDeck PQ ≥ 3 products below the hero bar'),
+        term('Success rate', pc(uSr, 0), uSrNote),
+        term('Orders/day per hit', f1(perHit, 1), perHitNote)
+      ], term('Added, orders/day', int(ceil2), 'on top of the hero ceiling', 'result'))}</div><div></div></div>
+      ${row('none', 'Can we replicate this with brands and sellers outside ShopDeck?', 'Not started.', '')}
+    </div>
+    <p class="small muted" style="margin:0">Ceilings are a model, not a forecast: they assume every hit sustains the same orders a day, ignore demand overlap between similar products, and the listed-but-unexplored base includes ShopDeck's long tail. Change the inputs in Rules → PMF benchmarks.</p></section>`;
+
+  // ---- Other ----
+  const sec3 = `<section class="card" aria-label="Other subjective points"><div class="card-head"><div><h2>3 · Other subjective points</h2><span class="muted small">Judgement calls the numbers don't settle</span></div></div>
+    <div class="thesis-rows">${row('none', 'Customer value proposition', 'Why a buyer would come to Khoj rather than the seller\'s own site or a marketplace: selection of proven products, price, trust, delivery. To be written up.', 'early')}</div></section>`;
+
+  return sec1 + sec2 + sec3;
 }
 
 function qualityTopCard(d) {
@@ -1028,6 +1133,7 @@ function qualityTopCard(d) {
   const cod = pay.find((x) => x.key === 'COD'), pre = pay.find((x) => x.key === 'Prepaid');
   return card('Customer quality at a glance', 'Customer quality at a glance', 'Khoj orders vs the same customers on ShopDeck seller sites (before Khoj), plus the last 7 days from the day-wise and P&L questions', kpiRow([
     ['Online orders, last 7 days', pc(O?.last7.onlinePct, 1), O ? `the 7 before: ${pc(O.prev7.onlinePct, 1)}` : ''],
+    ['Repeat Khoj orders paid online', pc(a ? d.customers.repeat?.payment?.repeatOnlinePct : null, 1), d.customers?.repeat?.payment ? `first orders: ${pc(d.customers.repeat.payment.firstOnlinePct, 1)} · ${int(d.customers.repeat.payment.repeatOrders)} repeat orders` : ''],
     ['Online share: Khoj vs sellers', cmp ? `${pc(100 - cmp.khoj.codPct, 1)} vs ${pc(100 - cmp.shopdeckBefore.codPct, 1)}` : '—', 'same customers'],
     ['RTO: Khoj vs sellers', cmp ? `${pc(cmp.khoj.rtoPct, 1)} vs ${pc(cmp.shopdeckBefore.rtoPct, 1)}` : '—', 'of delivered + returned'],
     ['COD RTO', pc(cod?.rtoPct, 1), pre ? `prepaid: ${pc(pre.rtoPct, 1)}` : ''],

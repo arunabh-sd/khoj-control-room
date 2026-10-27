@@ -40,7 +40,13 @@ export const DEFAULT_SETTINGS = {
   metaSgmvFactor: 0.9,
 
   // Overall Status
-  pnlRtoPct: 25,                // P&L question: predicted RTO % for orders not yet delivered or returned
+  pnlRtoPct: 25,
+
+  // PMF benchmarks (base sellers) and scalability modelling. 0 = not set / derive from data.
+  baseSpendNmv: 35,             // base sellers' Spend/NMV % (ShopDeck seller baseline)
+  baseHitPct: 0,                // base sellers' product hit % (share of products they push that become hits)
+  unexploredSuccessPct: 2,      // success % assumed for listed-but-unproven products (until 5+ control trials say otherwise)
+  ordersPerHitPerDay: 0,        // scalability per hit; 0 = from today's winners                // P&L question: predicted RTO % for orders not yet delivered or returned
 
   // Customers (order history question)
   khojSellerId: '6aad1869bcb80ce92eb3389b',   // Khoj by ShopDeck's seller id: its orders are Khoj orders
@@ -81,6 +87,10 @@ export const SETTING_LABELS = {
   signalWindowMin: ['Product signal', 'Performance window: at least this much recent spend (₹)'],
   metaSgmvFactor: ['Data', 'Ads question Spend/GMV correction: actual = reported × this'],
   pnlRtoPct: ['Overall Status', 'P&L: predicted RTO % for orders still in transit'],
+  baseSpendNmv: ['PMF benchmarks', 'Base sellers: Spend/NMV %'],
+  baseHitPct: ['PMF benchmarks', 'Base sellers: product hit % (0 = not set)'],
+  unexploredSuccessPct: ['PMF benchmarks', 'Success % for listed but unproven products'],
+  ordersPerHitPerDay: ['PMF benchmarks', 'Orders/day per hit at scale (0 = from current winners)'],
   khojSellerId: ['Customers', 'Khoj seller id (its orders are Khoj orders)'],
   sessionMinutes: ['Customers', 'Orders within this many minutes are one visit'],
   khojBaseUrl: ['Naming', 'Khoj site for product links'],

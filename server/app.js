@@ -43,7 +43,7 @@ function bundledFallback(name) {
 
 // Bump on a deploy that should refresh every source once: scheduled questions are pulled again on the next check, and
 // the first page load pulls the page-load questions instead of reusing an older pull.
-const DATA_VERSION = '2026-10-27.1';
+const DATA_VERSION = '2026-10-27.2';
 
 export function createApi(store) {
   const mem = {};   // warm-instance copy of the last Metabase pull per source

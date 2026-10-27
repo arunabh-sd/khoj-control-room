@@ -167,3 +167,41 @@ tr.cust summary { cursor: pointer; }
 .timeline { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 520px; }
 .timeline li.khoj { font-weight: 500; }
 .timeline li.browse { color: var(--muted); }
+
+/* Scaling plan: orders vs plan, colour-coded */
+:root { --amber: #C99400; }
+.plan-hero { display: flex; flex-wrap: wrap; gap: 28px; align-items: center; padding: 16px 18px; border-radius: 10px; border-left: 6px solid var(--line); background: var(--ground); }
+.plan-hero > div { display: flex; flex-direction: column; gap: 4px; }
+.plan-hero .label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.plan-hero .big { font-size: 40px; font-weight: 700; line-height: 1.05; }
+.plan-hero .plan-verdict { font-size: 15px; font-weight: 700; padding: 6px 12px; border-radius: 999px; background: var(--surface); }
+.plan-good { border-left-color: var(--green); } .plan-good .plan-verdict { color: var(--green-fg); background: var(--green-bg); }
+.plan-warn { border-left-color: var(--amber); } .plan-warn .plan-verdict { color: var(--amber-fg); background: var(--amber-bg); }
+.plan-bad { border-left-color: var(--orange); } .plan-bad .plan-verdict { color: var(--orange-fg); background: var(--orange-bg); }
+.plan-minis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.plan-mini { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); border-top: 4px solid var(--line); }
+.plan-mini .label { font-size: 12px; color: var(--muted); font-weight: 600; } .plan-mini .value { font-size: 20px; font-weight: 700; } .plan-mini .sub { font-size: 12px; color: var(--muted); }
+.plan-mini.plan-good { border-top-color: var(--green); } .plan-mini.plan-warn { border-top-color: var(--amber); } .plan-mini.plan-bad { border-top-color: var(--orange); }
+.week-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.wk { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--gray-bg); color: var(--gray-fg); border: 2px solid transparent; }
+.wk .num { font-size: 18px; color: var(--ink); }
+.wk-good { background: var(--green-bg); color: var(--green-fg); } .wk-warn { background: var(--amber-bg); color: var(--amber-fg); } .wk-bad { background: var(--orange-bg); color: var(--orange-fg); }
+.wk-future { background: transparent; border: 1px dashed var(--line); }
+.wk-now { border-color: var(--ink); }
+.checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.check { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 8px; border-left: 4px solid var(--line); background: var(--ground); }
+.check-good { border-left-color: var(--green); } .check-bad { border-left-color: var(--orange); }
+
+/* PMF thesis */
+.thesis-head { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; padding: 14px 16px; border-radius: 10px; background: var(--ground); border-left: 6px solid var(--line); }
+.thesis-head .big { font-size: 30px; font-weight: 700; }
+.thesis-rows { display: flex; flex-direction: column; }
+.thesis-row { display: grid; grid-template-columns: 150px 240px 1fr auto; gap: 14px; align-items: start; padding: 12px 0; border-top: 1px solid var(--line-soft); }
+.thesis-row .claim { font-weight: 600; }
+.thesis-row .ev { font-size: 13px; line-height: 1.5; }
+.formula { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.formula .term { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; min-width: 120px; max-width: 230px; }
+.formula .term .num { font-size: 20px; font-weight: 700; }
+.formula .op { font-size: 20px; color: var(--muted); }
+.formula .term.result { background: var(--blue-bg); border-color: var(--blue-bg); }
+@media (max-width: 760px) { .thesis-row { grid-template-columns: 1fr; gap: 6px; } .plan-hero .big { font-size: 32px; } }

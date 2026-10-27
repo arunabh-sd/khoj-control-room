@@ -93,6 +93,8 @@ export function actualRows({ daywiseRows, adsRows, trials, settings, today }) {
   const isLoss = (a) => a === 'kill' || a === 'killed' || a === 'stopped';
   const decidedOn = (t) => (isWin(t.action) || isLoss(t.action) ? (t.lastSpendDate || t.firstDate) : null);
   return [...weeks.values()].sort((a, b) => (a.week < b.week ? -1 : 1)).map((x) => {
+    // Days with data this week: from the day-wise question, else from the ad data's dates.
+    for (const r of adsRows || []) { const d2 = day(r.date); if (d2 && d2 < today && mondayOf(d2) === x.week) x.days.add(d2); }
     const days = Math.max(1, x.dw.length || x.days.size);
     const dwA = aggDays(x.dw);
     const meta = Object.values(x.meta).reduce((a, m) => a + m.spend, 0);
@@ -151,5 +153,20 @@ export function computePlan({ plan, daywiseRows, adsRows, trials, settings, toda
   if (cur?.plan && cur?.actual && cur.actual.ordersPerDay !== null && cur.plan.ordersPerDay && cur.actual.ordersPerDay < cur.plan.ordersPerDay * 0.9) risks.push(`Orders per day ${cur.actual.ordersPerDay.toFixed(0)} vs ${cur.plan.ordersPerDay.toFixed(0)} planned for this week.`);
   if (!P.saved) risks.unshift('The plan is still the default placeholder: set the weekly budgets and assumptions below so the comparison means something.');
 
-  return { plan: P, rows, checks, risks, currentWeek: cur?.week || null, labels: BUCKET_LABELS };
+  // Orders are the scaling metric. Gap this week split into spend, efficiency and basket:
+  // orders = spend ÷ (Spend/GMV × AOV), so ln(actual/plan) = ln(spend) − ln(S/GMV) − ln(AOV) ratios.
+  let gap = null;
+  const ca = cur?.actual, cp = cur?.plan;
+  if (ca && cp && ca.ordersPerDay && cp.ordersPerDay && ca.das.total && cp.das.total && ca.sgmv.overall && cp.sgmv.overall && ca.aov && cp.aov) {
+    const parts = [['Spend', Math.log(ca.das.total / cp.das.total)], ['Spend/GMV (efficiency)', -Math.log(ca.sgmv.overall / cp.sgmv.overall)], ['AOV', -Math.log(ca.aov / cp.aov)]];
+    const tot = parts.reduce((a, [, v]) => a + v, 0);
+    const delta = ca.ordersPerDay - cp.ordersPerDay;
+    gap = { delta, rows: parts.map(([label, v]) => ({ label, orders: tot ? delta * (v / tot) : 0 })) };
+  }
+  // Orders to date since the plan started: actual orders vs the plan's orders for the same days.
+  let cum = null;
+  const done = rows.filter((r) => r.plan && r.actual && r.week <= thisWeek);
+  if (done.length) cum = { actual: done.reduce((a, r) => a + (r.actual.ordersPerDay || 0) * r.actual.days, 0), plan: done.reduce((a, r) => a + r.plan.ordersPerDay * r.actual.days, 0), weeks: done.length };
+
+  return { plan: P, rows, checks, risks, gap, cum, currentWeek: cur?.week || null, labels: BUCKET_LABELS };
 }

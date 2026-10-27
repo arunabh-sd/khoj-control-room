@@ -8,8 +8,9 @@ import { compactUniverse } from './universe.js';
 import { compactHistory, compactBrowsing } from './history.js';
 
 const SOURCES = {
-  // Overall Status: Khoj day-wise orders, GMV, spend and ad funnel (Q16083), on page load.
-  daywise: { env: 'MB_Q_DAYWISE', file: 'daywise.csv', label: 'Khoj day-wise (orders, GMV, spend)' },
+  // Overall Status: Khoj day-wise orders, GMV, spend and ad funnel (Q16083). Too slow for a page load, so it's
+// pre-pulled every hour by the scheduled job.
+  daywise: { env: 'MB_Q_DAYWISE', file: 'daywise.csv', label: 'Khoj day-wise (orders, GMV, spend)', everyHours: 1 },
   // P&L (Q16167) for several date windows (weeks since launch, last 7 days, yesterday, since launch), once a day.
   pnl: { env: 'MB_Q_PNL', file: 'pnl.csv', label: 'Khoj P&L by window', everyHours: 24 },
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products', everyHours: 6 },

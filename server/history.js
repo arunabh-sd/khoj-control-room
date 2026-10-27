@@ -510,8 +510,16 @@ export function analyseHistory(rows, ctx) {
     'New to ShopDeck': within(custs.filter((cu) => cu.newToSd), 14, khojRepeat),
     'Returning to ShopDeck': within(custs.filter((cu) => !cu.newToSd), 14, khojRepeat)
   };
+  // Payment on repeat orders vs first orders (cancelled lines already left out): do people who come back pay online more?
+  const onlineShare = (lines) => { const o = new Map(); for (const x of lines) o.set(x.o, x.pm); const v = [...o.values()]; return v.length ? pct(v.filter((pm) => !isCod(pm)).length, v.length) : null; };
+  const firstLinesAll = custs.flatMap((cu) => cu.firstLines);
+  const repeatersList = custs.filter(repeatOf);
+  const payment = {
+    firstOnlinePct: onlineShare(firstLinesAll), repeatOnlinePct: onlineShare(repeatLines.map((r) => r.x)),
+    repeatersFirstOnlinePct: onlineShare(repeatersList.flatMap((cu) => cu.firstLines)), repeatOrders: new Set(repeatLines.map((r) => r.x.o)).size
+  };
   const repeat = {
-    seg14,
+    seg14, payment,
     customers: N, end, curves, bench, cohorts, kinds: { lines: repeatLines.length, ...kind }, afterDelivery, value,
     repeaters: custs.filter(repeatOf).length, sessionMinutes: gap
   };
