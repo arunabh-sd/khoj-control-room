@@ -103,7 +103,7 @@ export function createApi(store) {
     const today = todayIST(), yest = addDaysIST(today, -1);
     const daily = parseDaywise(dw.rows || []);
     const launch = daily[0]?.date || addDaysIST(yest, -27);
-    const pred = predictRto(hist.rows || [], settings.khojSellerId, today);
+    const pred = predictRto(hist.rows || [], settings.khojSellerId, today, { from: day(settings.predRtoFrom), to: day(settings.predRtoTo) });
     const rtoOf = (start, end) => {
       const a = aggDays(daily.filter((r) => r.date >= start && r.date <= end));
       const v = rtoForMix(pred, a.onlinePct);
@@ -251,6 +251,8 @@ export function createApi(store) {
     const sources = {};
     for (const name of SOURCE_NAMES) sources[name] = await getSource(name);
     sources.plan = store.getKV ? await store.getKV('plan') : null;
+    // Seller S/GMV per product only arrived in the universe compaction later: until a fresh pull, read it from the repo copy.
+    if (!(sources.universe.rows || []).some((r) => r.l30d_sgmv !== undefined)) sources.universeBundle = bundledFallback('universe');
     sources.loadedAt = SOURCE_NAMES.filter((n) => !isDaily(n)).map((n) => sources[n].loadedAt).filter(Boolean).sort()[0] || new Date().toISOString();
     const settings = mergeSettings(await store.getSettings());
     const history = await store.listDecisions();

@@ -498,3 +498,37 @@ export function analyseProductQuality(rows, { minSellerOrders = 5 } = {}) {
   const onlineRto = metric('rto', (g) => ({ num: g.Online.nonCancelled - g.Online.delivered, den: g.Online.nonCancelled }), (g) => g.Online.nonCancelled, Math.max(2, Math.round(minSellerOrders / 2)));
   return { products: P.size, online, cancel, rto, codRto, onlineRto };
 }
+
+// Early signs of likability from the comparison questions (rating Q16826, return requests Q16859, bumper coupon
+// Q16830). Each returns an "ALL" row already weighted by Khoj orders, plus one row per parent seller.
+export function analyseLikability({ rating, returns, bumper }) {
+  const all = (rows) => (rows || []).find((r) => /^ALL/i.test(String(r.parent_seller_id || r.parent_seller_name || ''))) || null;
+  const sellers = (rows, khojN) => (rows || []).filter((r) => !/^ALL/i.test(String(r.parent_seller_id || ''))).sort((a, b) => n(b[khojN]) - n(a[khojN]));
+  const out = {};
+  const R = all(rating);
+  if (R) out.rating = { khoj: num(R.khoj_avg_rating), parent: num(R.parent_avg_rating), diff: num(R.rating_diff_khoj_minus_parent), khojN: n(R.khoj_rated_orders), parentN: n(R.parent_rated_orders), products: n(R.comparable_products), aovDiscount: num(R.khoj_aov_discount_vs_parent_pct), khojDelivered: n(R.khoj_delivered_orders),
+    rows: sellers(rating, 'khoj_rated_orders').map((r) => ({ name: String(r.parent_seller_name || '').trim(), khoj: num(r.khoj_avg_rating), parent: num(r.parent_avg_rating), khojN: n(r.khoj_rated_orders), parentN: n(r.parent_rated_orders) })) };
+  const T = all(returns);
+  if (T) out.returns = { khoj: num(T.khoj_return_request_pct), parent: num(T.parent_return_request_pct), diff: num(T.return_pct_diff_khoj_minus_parent), khojN: n(T.khoj_delivered_orders), parentN: n(T.parent_delivered_orders), khojReturns: n(T.khoj_return_requests), products: n(T.comparable_products), aovDiscount: num(T.khoj_aov_discount_vs_parent_pct),
+    rows: sellers(returns, 'khoj_delivered_orders').map((r) => ({ name: String(r.parent_seller_name || '').trim(), khoj: num(r.khoj_return_request_pct), parent: num(r.parent_return_request_pct), khojN: n(r.khoj_delivered_orders), parentN: n(r.parent_delivered_orders) })) };
+  const B = all(bumper);
+  if (B) out.bumper = { khoj: num(B.khoj_bumper_order_pct), parent: num(B.parent_bumper_order_pct), diff: num(B.bumper_pct_diff_khoj_minus_parent), khojN: n(B.khoj_valid_orders), parentN: n(B.parent_valid_orders),
+    rows: sellers(bumper, 'khoj_valid_orders').map((r) => ({ name: String(r.parent_seller_name || '').trim(), khoj: num(r.khoj_bumper_order_pct), parent: num(r.parent_bumper_order_pct), khojN: n(r.khoj_valid_orders), parentN: n(r.parent_valid_orders) })) };
+  return Object.keys(out).length ? out : null;
+}
+
+// Visits after delivery (sql/revisit_after_delivery.sql): Khoj vs parent sellers weighted by Khoj orders.
+export function analyseRevisit(rows, { khojSellerId, weights }) {
+  if (!rows?.length) return null;
+  const all = rows.map((r) => ({ ...r, seller_id: String(r.seller_id) }));
+  const k = all.find((r) => r.seller_id === khojSellerId);
+  const others = all.filter((r) => r.seller_id !== khojSellerId);
+  const rate = (a, b) => (r) => (n(r[b]) ? (n(r[a]) / n(r[b])) * 100 : null);
+  const b7 = weighted(others, weights, rate('visited_7d', 'delivered_customers'), (r) => n(r.delivered_customers), 20);
+  const b14 = weighted(others, weights, rate('visited_14d', 'eligible_14d'), (r) => n(r.eligible_14d), 20);
+  return {
+    khoj7: k ? rate('visited_7d', 'delivered_customers')(k) : null, khoj14: k ? rate('visited_14d', 'eligible_14d')(k) : null,
+    khojN: k ? n(k.delivered_customers) : 0, khojN14: k ? n(k.eligible_14d) : 0,
+    base7: b7.value, base14: b14.value, sellers: b7.sellers
+  };
+}

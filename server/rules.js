@@ -41,6 +41,9 @@ export const DEFAULT_SETTINGS = {
 
   // Overall Status
   pnlRtoPct: 25,
+  // Predicted RTO: COD and online RTO measured on Khoj orders placed in this window (blank = D-17 to D-10).
+  predRtoFrom: '2026-10-06',
+  predRtoTo: '2026-10-13',
 
   // PMF benchmarks (base sellers) and scalability modelling. 0 = not set / derive from data.
   baseSpendNmv: 35,             // base sellers' Spend/NMV % (ShopDeck seller baseline)
@@ -87,6 +90,8 @@ export const SETTING_LABELS = {
   signalWindowMin: ['Product signal', 'Performance window: at least this much recent spend (₹)'],
   metaSgmvFactor: ['Data', 'Ads question Spend/GMV correction: actual = reported × this'],
   pnlRtoPct: ['Overall Status', 'P&L: predicted RTO % for orders still in transit'],
+  predRtoFrom: ['Overall Status', 'Predicted RTO: measure on orders placed from (YYYY-MM-DD, blank = D-17)'],
+  predRtoTo: ['Overall Status', 'Predicted RTO: … to (YYYY-MM-DD, blank = D-10)'],
   baseSpendNmv: ['PMF benchmarks', 'Base sellers: Spend/NMV %'],
   baseHitPct: ['PMF benchmarks', 'Base sellers: product hit % (0 = not set)'],
   unexploredSuccessPct: ['PMF benchmarks', 'Success % for listed but unproven products'],

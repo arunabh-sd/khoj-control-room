@@ -3,7 +3,7 @@ import { TEST_CATEGORIES, categoryOf } from './categories.js';
 import { analyseHistory } from './history.js';
 import { computeOverview } from './overview.js';
 import { computePlan } from './plan.js';
-import { khojOrderWeights, analyseEvents, analyseRepeatBenchmark, analyseVisitorPersonalisation, analyseProductQuality } from './benchmarks.js';
+import { khojOrderWeights, analyseEvents, analyseRepeatBenchmark, analyseVisitorPersonalisation, analyseProductQuality, analyseLikability, analyseRevisit } from './benchmarks.js';
 
 const CATS_ALL = [...TEST_CATEGORIES, 'Other'];
 
@@ -857,14 +857,29 @@ export function compute(src, s, history, today = todayIST()) {
   const weights = khojOrderWeights(src.history?.rows || [], s.khojSellerId, idx);
   const sessions = src.events?.rows?.length ? analyseEvents(src.events.rows, { khojSellerId: s.khojSellerId, weights, idx, khojToSellerProduct, sellerProductCat, historyRows: src.history?.rows || [] }) : null;
   // ---------- Overall Status and Scaling Plan ----------
-  const overview = src.daywise?.rows?.length ? computeOverview({ daywiseRows: src.daywise.rows, pnlRows: [...(src.pnl?.rows || []), ...(src.pnlWeeks?.rows || [])], historyRows: src.history?.rows || [], khojSellerId: s.khojSellerId, today }) : null;
+  const overview = src.daywise?.rows?.length ? computeOverview({ daywiseRows: src.daywise.rows, pnlRows: [...(src.pnl?.rows || []), ...(src.pnlWeeks?.rows || [])], historyRows: src.history?.rows || [], orderRows: src.khojOrders?.rows || [], khojSellerId: s.khojSellerId, sessionMinutes: s.sessionMinutes, rtoWindow: { from: day(s.predRtoFrom), to: day(s.predRtoTo) }, today }) : null;
   const scaling = computePlan({ plan: src.plan, daywiseRows: src.daywise?.rows || [], adsRows: src.ads?.rows || [], trials: trialRows, settings: s, today });
   const productQuality = src.prodQuality?.rows?.length ? analyseProductQuality(src.prodQuality.rows) : null;
+  const likability = analyseLikability({ rating: src.rating?.rows, returns: src.returns?.rows, bumper: src.bumper?.rows });
+  const revisit = src.revisit?.rows?.length ? analyseRevisit(src.revisit.rows, { khojSellerId: s.khojSellerId, weights }) : null;
+  // Seller-side Spend/GMV for the products Khoj sells: the universe question's L30D S/GMV per seller product, weighted
+  // by Khoj's orders of that product.
+  let sellerSgmv = null;
+  {
+    const uRows = (src.universe?.rows || []).some((r) => r.l30d_sgmv !== undefined && r.l30d_sgmv !== null) ? src.universe.rows : (src.universeBundle?.rows || []);
+    const sg = new Map();
+    for (const r of uRows) { const v = num(r.l30d_sgmv); if (r.khoj_product_id && v !== null && v > 0 && (num(r.l30d_spend) || 0) > 0) sg.set(String(r.khoj_product_id), v <= 3 ? v * 100 : v); }
+    const w = new Map();
+    for (const x of src.history?.rows || []) if (x.s === s.khojSellerId && x.st !== 'C') w.set(x.p, (w.get(x.p) || 0) + 1);
+    let acc = 0, ws = 0, all = 0;
+    for (const [pid, c] of w) { all += c; if (sg.has(pid)) { acc += c * sg.get(pid); ws += c; } }
+    if (ws) sellerSgmv = { value: acc / ws, coverage: (ws / all) * 100, products: [...w.keys()].filter((p) => sg.has(p)).length };
+  }
   const visitorPersonalisation = src.personalise?.rows?.length ? analyseVisitorPersonalisation(src.personalise.rows) : null;
   const repeatBench = src.benchmark?.rows?.length ? analyseRepeatBenchmark(src.benchmark.rows, { khojSellerId: s.khojSellerId, weights }) : null;
 
   return {
-    today, catAov, notes, kpis, killReview, overlap, customers, sessions, repeatBench, visitorPersonalisation, productQuality, overview, scaling,
+    today, catAov, notes, kpis, killReview, overlap, customers, sessions, repeatBench, visitorPersonalisation, productQuality, likability, revisit, sellerSgmv, overview, scaling,
     universe: hasUniverse ? { byCat: universe, hasAll: true, hasStatus: uHasStatus, origin: src.universe.origin } : null,
     activeTrialKeys: trials.filter((t) => t.active).map((t) => t.id),
     coverage: coverageRows,

@@ -15,6 +15,13 @@ const SOURCES = {
   // days before, every 2 hours; each week since launch and since launch, once a day.
   pnl: { env: 'MB_Q_PNL', file: 'pnl.csv', label: 'Khoj P&L: today, yesterday, L3D, L7D', everyHours: 2 },
   pnlWeeks: { env: 'MB_Q_PNL', file: 'pnl_weeks.csv', label: 'Khoj P&L: weeks since launch', everyHours: 24 },
+  // Khoj's own orders since launch (sql/khoj_orders.sql): new vs repeat orders by day. Small; every hour.
+  khojOrders: { env: 'MB_Q_KHOJ_ORDERS', file: 'khoj_orders.csv', label: 'Khoj orders (new vs repeat)', everyHours: 1 },
+  // Early signs of likability, Khoj vs parent sellers on comparable products, weighted by Khoj orders (the questions
+  // compute the weighting themselves and return an "ALL" row).
+  rating: { env: 'MB_Q_RATING', id: '16826', file: 'rating.csv', label: 'User rating: Khoj vs parent (comparable products)', everyHours: 24 },
+  returns: { env: 'MB_Q_RETURNS', id: '16859', file: 'returns.csv', label: 'Return requests per delivered order: Khoj vs parent', everyHours: 24 },
+  bumper: { env: 'MB_Q_BUMPER', id: '16830', file: 'bumper.csv', label: 'Bumper coupon use: Khoj vs parent', everyHours: 24 },
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products', everyHours: 6 },
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
   catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
@@ -27,6 +34,7 @@ const SOURCES = {
   events: { env: 'MB_Q_EVENTS', file: 'events.csv', label: 'Site sessions: Khoj vs parent sellers', everyHours: 24, phase: 2 },
   personalise: { env: 'MB_Q_PERSONALISE', file: 'personalise.csv', label: 'Khoj visitors: personalisation potential', everyHours: 24, phase: 2 },
   prodQuality: { env: 'MB_Q_PRODUCT_QUALITY', file: 'prod_quality.csv', label: 'Order quality: Khoj vs the same products on seller sites', everyHours: 24, phase: 2 },
+  revisit: { env: 'MB_Q_REVISIT', file: 'revisit.csv', label: 'Visits after delivery: Khoj vs parent sellers', everyHours: 24, phase: 2 },
   benchmark: { env: 'MB_Q_BENCHMARK', file: 'benchmark.csv', label: 'Repeat benchmark: parent sellers', everyHours: 24, phase: 2 },
   // Phase 3: the heaviest question gets its own scheduled function, so if it runs out of time it can't take the
   // others down with it.
@@ -59,7 +67,7 @@ export async function loadOne(name, { timeoutMs, params, paramSets } = {}) {
         throw e;
       }
     }
-    const id = process.env[src.env] || (src.alt && process.env[src.alt]);
+    const id = process.env[src.env] || (src.alt && process.env[src.alt]) || src.id || '';
     if (!id) return { status: 'missing', origin: `${src.env} not set`, rows: [], loadedAt };
     let rows;
     if (paramSets?.length) {
@@ -71,7 +79,7 @@ export async function loadOne(name, { timeoutMs, params, paramSets } = {}) {
     if (src.compact) rows = src.compact(rows);
     return { status: 'ok', origin: `Metabase Q${id}`, rows, rawRows, loadedAt };
   } catch (e) {
-    const id = process.env[src.env] || (src.alt && process.env[src.alt]);
+    const id = process.env[src.env] || (src.alt && process.env[src.alt]) || src.id || '';
     return { status: 'error', origin: id ? `Metabase Q${id}` : src.env, error: e.message, rows: [], loadedAt };
   }
 }

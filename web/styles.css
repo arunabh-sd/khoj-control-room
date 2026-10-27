@@ -227,3 +227,24 @@ tr.cust summary { cursor: pointer; }
 @media (max-width: 1000px) { .stiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .stile .big { font-size: 24px; } }
 .seg[aria-pressed="true"] .muted { color: inherit; opacity: .8; }
+
+/* Snapshot scorecard: minimal */
+.wseg { display: inline-flex; padding: 3px; background: var(--ground); border: 1px solid var(--line); border-radius: 9px; gap: 2px; flex-wrap: wrap; }
+.wseg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 7px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; display: inline-flex; gap: 6px; align-items: baseline; }
+.wseg button span { font-weight: 400; font-size: 11px; }
+.wseg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.kgroup { display: grid; grid-template-columns: 110px 1fr; gap: 0; border-top: 1px solid var(--line-soft); }
+.kgroup-label { padding: 18px 0; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.kgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.kcell { padding: 16px 18px 12px; border-left: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.klabel { font-size: 12px; color: var(--muted); }
+.kval { font-size: 26px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); line-height: 1.15; }
+.ksub { line-height: 1.4; }
+.kgood { color: var(--green-fg); } .kbad { color: var(--orange-fg); } .kbadv { color: var(--orange-fg); }
+.kspark { width: 100%; height: 28px; margin-top: 6px; display: block; }
+@media (max-width: 1000px) { .kgroup { grid-template-columns: 1fr; } .kgroup-label { padding: 14px 0 0; } .kgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kcell { border-left: 0; border-top: 1px solid var(--line-soft); padding-left: 0; } }
+.card-head > .wseg { flex-direction: row; display: inline-flex; }
+.kval { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums; font-size: 28px; }
+.kgrid-early { grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 1px solid var(--line-soft); }
+.kgrid-early .kcell:first-child { border-left: 0; padding-left: 0; }
+@media (max-width: 1000px) { .kgrid-early { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

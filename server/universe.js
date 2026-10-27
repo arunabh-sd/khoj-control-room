@@ -22,7 +22,7 @@ export function compactUniverse(rows, { minPq = 3 } = {}) {
     // questions, like the buyer overlap one, to Khoj products).
     if (orders >= DETAIL_MIN_ORDERS || uploaded || r.is_hero !== undefined) {
       out.push({ category_l2: l2, category_l3: l3, category_l4: l4, n: 1, uploaded, live,
-        l30d_orders: orders, l30d_spend: num(r.l30d_spend) || 0, profit_pct_d40_d10: num(r.profit_pct_d40_d10), is_hero: r.is_hero, pq: pq ?? undefined,
+        l30d_orders: orders, l30d_spend: num(r.l30d_spend) || 0, l30d_sgmv: num(r.l30d_s_gmv) ?? undefined, profit_pct_d40_d10: num(r.profit_pct_d40_d10), is_hero: r.is_hero, pq: pq ?? undefined,
         seller_product_id: r.seller_product_id || undefined, khoj_product_id: r.khoj_product_id || undefined,
         product_title: uploaded ? undefined : r.product_title });
       continue;
