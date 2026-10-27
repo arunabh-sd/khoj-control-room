@@ -148,6 +148,12 @@ export function computeOverview({ daywiseRows, pnlRows, historyRows, orderRows, 
     return { key, label, from, to, ...a, predictedRto, cmPct: p ? p.profitPct : null, pnlRto: p ? p.rtoPct : null, pnl: p, nr };
   });
   const prev7 = aggDays(inRange(addDaysIST(yest, -13), addDaysIST(yest, -7)));
+  // Best 3 of the last 5 complete days by Spend/NMV (S/GMV ÷ ((1 − cancelled) × (1 − predicted RTO at that day's mix)):
+  // the business at its better days, for the cost-of-doing-business comparison.
+  const snmvOf = (a) => { const rto = rtoForMix(pred, a.onlinePct); const nmv = a.cancelPct === null || rto === null ? null : (1 - a.cancelPct / 100) * (1 - rto / 100); return { rto, nmv, snmv: nmv && a.sgmv !== null ? a.sgmv / nmv : null }; };
+  const last5 = inRange(addDaysIST(yest, -4), yest).map((r) => ({ r, ...snmvOf(aggDays([r])) })).filter((x) => x.snmv !== null);
+  const pick = [...last5].sort((a, b) => a.snmv - b.snmv).slice(0, 3);
+  const best3 = pick.length ? (() => { const a = aggDays(pick.map((x) => x.r).sort((x, y) => (x.date < y.date ? -1 : 1))); const s = snmvOf(a); return { ...a, dates: pick.map((x) => x.r.date).sort(), predictedRto: s.rto, nmvShare: s.nmv, snmv: s.snmv, considered: last5.map((x) => ({ date: x.r.date, snmv: x.snmv })) }; })() : null;
   const last7 = windows.find((w) => w.key === 'l7d');
 
   // Weeks (Mon–Sun); the current week runs to yesterday.
@@ -171,7 +177,7 @@ export function computeOverview({ daywiseRows, pnlRows, historyRows, orderRows, 
   const PY = pnlBy.yesterday || pnlBy.file || null;
   const breakevenAdSgmv = PY && PY.breakevenMktOfGmv !== null ? PY.breakevenMktOfGmv / GST : null;
 
-  return { today, yesterday: yest, daily, rolling, windows, last7, prev7, weeks, predictedRto: pred, newRepeat: NR ? { source: NR.source, asOf: NR.asOf } : null,
+  return { today, yesterday: yest, daily, rolling, windows, last7, prev7, best3, weeks, predictedRto: pred, newRepeat: NR ? { source: NR.source, asOf: NR.asOf } : null,
     pnl: { yesterday: PY, l7d: pnlBy.l7d || pnlBy.last7 || pnlBy.file || null, prev7: pnlBy.prev7 || null, all: pnlBy.all || null, last7: pnlBy.l7d || pnlBy.last7 || pnlBy.file || null },
     breakevenAdSgmv };
 }

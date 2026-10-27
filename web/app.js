@@ -1112,11 +1112,14 @@ function viewPmfSummary(d) {
   const f1 = (v, dd = 1) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(dd));
 
   // ---- Thesis 1: lower cost of doing business ----
-  // Spend/NMV, Khoj (L3D) vs the same products on their own seller sites: S/GMV ÷ ((1 − cancelled) × (1 − RTO)).
-  const W3 = O?.windows?.find((w) => w.key === 'l3d'), QQ = d.productQuality, SG = d.sellerSgmv;
+  // Spend/NMV, Khoj (best 3 of the last 5 days) vs the same products on their own seller sites:
+  // S/GMV ÷ ((1 − cancelled) × (1 − RTO)).
+  const QQ = d.productQuality, SG = d.sellerSgmv;
   const nmvShare = (c, r) => (c === null || r === null || c === undefined || r === undefined ? null : (1 - c / 100) * (1 - r / 100));
-  const kSide = W3 ? { sgmv: W3.sgmv, cancel: W3.cancelPct, online: W3.onlinePct, codRto: O.predictedRto?.cod.rtoPct, onlineRto: O.predictedRto?.online.rtoPct, rto: W3.predictedRto } : null;
-  if (kSide) { kSide.nmv = nmvShare(kSide.cancel, kSide.rto); kSide.snmv = kSide.nmv ? kSide.sgmv / kSide.nmv : null; }
+  // Khoj side: the best 3 of the last 5 complete days by Spend/NMV, pooled (worked out on the server).
+  const B3 = O?.best3, PRd = O?.predictedRto;
+  const kSide = B3 ? { sgmv: B3.sgmv, cancel: B3.cancelPct, online: B3.onlinePct, codRto: PRd?.cod.rtoPct, onlineRto: PRd?.online.rtoPct, rto: B3.predictedRto, nmv: B3.nmvShare, snmv: B3.snmv } : null;
+  const bestLabel = B3 ? B3.dates.map(shortDate).join(', ') : '';
   const sSide = { sgmv: SG?.value ?? null, cancel: QQ?.cancel.seller ?? null, online: QQ?.online.seller ?? null, codRto: QQ?.codRto.seller ?? null, onlineRto: QQ?.onlineRto.seller ?? null };
   sSide.rto = sSide.online !== null && sSide.codRto !== null ? (1 - sSide.online / 100) * sSide.codRto + (sSide.online / 100) * (sSide.onlineRto ?? sSide.codRto) : null;
   sSide.nmv = nmvShare(sSide.cancel, sSide.rto); sSide.snmv = sSide.nmv && sSide.sgmv !== null ? sSide.sgmv / sSide.nmv : null;
@@ -1174,13 +1177,13 @@ function viewPmfSummary(d) {
   const c1 = counts([hitS, qS, eS2, rS, cS]);
   const sec1 = `<section class="card" aria-label="Lower cost of doing business"><div class="card-head"><div><h2>1 · Lower cost of doing business</h2><span class="muted small">Thesis: Khoj sells at a lower Spend/NMV than base sellers, because each of the drivers below is better</span></div>${stChip(t1)}</div>
     <div class="thesis-head plan-${{ yes: 'good', partly: 'warn', no: 'bad' }[t1] || ''}">
-      <div><div class="small muted">Khoj Spend / NMV · L3D</div><div class="big num">${pc(kSn, 1)}</div></div>
+      <div><div class="small muted">Khoj Spend / NMV · best 3 of last 5 days (${esc(bestLabel)})</div><div class="big num">${pc(kSn, 1)}</div></div>
       <div><div class="small muted">Sellers, same products (Khoj-order weighted)</div><div class="big num">${pc(baseSn, 1)}</div></div>
       <div class="small" style="max-width:460px">${t1 === 'data' ? `Needs ${SG ? '' : 'seller S/GMV from the universe question and '}the order-quality question (MB_Q_PRODUCT_QUALITY) for the seller side's cancellations, online share and RTO.` : kSn <= baseSn ? `Playing out: Khoj spends ${f1(baseSn - kSn)} pts less per rupee of NMV than the same products on their sellers' sites.` : `${t1 === 'partly' ? 'Close, not there yet' : 'Not playing out yet'}: Khoj spends ${f1(kSn - baseSn)} pts more per rupee of NMV.`} Drivers: ${c1.yes} playing out, ${c1.partly} partly, ${c1.no} not.</div>
     </div>
     ${tbl([
       { h: 'Spend / NMV build-up', v: (r) => `<span class="${r.strong ? '' : 'muted'}">${r.strong ? `<strong>${esc(r.l)}</strong>` : esc(r.l)}</span>` },
-      { h: 'Khoj · L3D', r: 1, v: (r) => (r.strong ? `<strong>${r.k}</strong>` : r.k) },
+      { h: 'Khoj · best 3 of L5D', r: 1, v: (r) => (r.strong ? `<strong>${r.k}</strong>` : r.k) },
       { h: 'Sellers · same products', r: 1, v: (r) => (r.strong ? `<strong>${r.s}</strong>` : r.s) },
       { h: 'Source (sellers)', v: (r) => `<span class="muted small">${esc(r.src)}</span>` }
     ], [
