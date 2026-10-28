@@ -250,3 +250,12 @@ tr.cust summary { cursor: pointer; }
 @media (max-width: 1000px) { .kgrid-early { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .kgrid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 @media (max-width: 1000px) { .kgrid-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Sign in and the signed-in person */
+.who { display: flex; gap: 10px; align-items: center; }
+.who:empty { display: none; }
+.btn-quiet { min-height: 32px; padding: 0 10px; font-weight: 500; }
+body.signed-out .top-actions, body.signed-out #tabs, body.signed-out #notices { display: none; }
+.login { max-width: 420px; margin: 48px auto 0; width: 100%; }
+.google-button { min-height: 44px; display: flex; align-items: center; }
+#freshness:empty { display: none; }

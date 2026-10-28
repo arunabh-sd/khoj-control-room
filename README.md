@@ -36,9 +36,20 @@ The operating dashboard for Khoj product testing. It reads Metabase, applies the
 | `MB_Q_PRODUCT_QUALITY` | default 17003: order quality, Khoj vs the same products on their seller sites (`sql/product_quality.sql`, variable `khoj_products`, Text) |
 | `MB_Q_BROWSING` | Khoj buyers' browsing on ShopDeck sites (`sql/khoj_buyer_browsing.sql`) |
 | `MB_Q_PERSONALISE` | Khoj visitors' personalisation potential (`sql/visitor_personalisation.sql`) |
-| `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password |
+| `DASHBOARD_PASSWORD` | optional; set it to put the dashboard behind a password (ignored once Google sign-in is on) |
+| `GOOGLE_CLIENT_ID` | turns on **Sign in with Google**: the OAuth client id (`….apps.googleusercontent.com`) of a *Web application* client in Google Cloud, with the site's URL under *Authorised JavaScript origins* |
+| `ALLOWED_DOMAINS` | Google Workspace domains that may sign in: `shopdeck.com,blitzscale.co`. Anyone else is refused (and listed under Blocked sign-ins) |
+| `ADMIN_EMAILS` | who sees the **Usage** tab: `arunabh.mishra@blitzscale.co,piyush.sinhal@blitzscale.co` |
+| `SESSION_SECRET` | optional; signs the 30-day session cookie. Defaults to a key derived from `METABASE_API_KEY`. Changing it signs everyone out |
 
 3. Deploy. Storage is **Netlify Blobs**, which needs no setup: task ticks, the decision log, rule edits and the last Metabase pull live there.
+
+**Sign in with Google and usage:**
+- With `GOOGLE_CLIENT_ID` set, the dashboard shows a *Sign in with Google* button. The server checks Google's signed token itself (signature against Google's keys, our client id, expiry, verified email) and lets in only Google Workspace accounts on `ALLOWED_DOMAINS` (it checks Google's `hd` claim, so a personal Google account made with a company address is refused). A good sign-in gives a 30-day HttpOnly cookie. Without `GOOGLE_CLIENT_ID` nothing changes: the dashboard is open, or behind `DASHBOARD_PASSWORD`.
+- Access is checked on every request: take a domain out of `ALLOWED_DOMAINS` and its people are signed out at once.
+- `ADMIN_EMAILS` get a **Usage** tab: people active today, in the last 7 days and in the window; daily active people and active time; per person last seen, days active, sessions, sign-ins, active time, most used tab and what they did (task ticks, rule changes with the rule names, plan edits, refreshes, CSV downloads); time and views per tab; recent sign-ins and changes; **blocked sign-ins** (accounts from other domains that tried, with how many times); a CSV of every event.
+- Active time counts 15-second ticks while the page is visible and someone moved, typed or scrolled in the last 2 minutes. The page sends its events every 2 minutes and when it's hidden. Events are kept 180 days (Netlify Blobs: one blob per batch, folded into one per day; Postgres: `usage_events`).
+- Setting up the Google client: Google Cloud console → APIs & Services → Credentials → Create credentials → OAuth client ID → *Web application*. Add the site URL (and `http://localhost:3000` for local runs) under *Authorised JavaScript origins*; no redirect URI or client secret is needed. On the OAuth consent screen, *Internal* user type keeps it to your Workspace.
 
 **When Metabase is called:**
 - Ads, ad set map and product-wise spend: when you click "Refresh from Metabase", and when the page opens if the last pull is over 30 minutes old (`PAGE_PULL_MINUTES`).

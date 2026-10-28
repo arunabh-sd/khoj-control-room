@@ -5,6 +5,14 @@ try { Object.assign(ui, JSON.parse(localStorage.getItem('khoj-ui') || '{}'), { d
 // Older saved tabs → their new home.
 { const OLD = { room: ['pmf', 'hits'], cover: ['pmf', 'hits'], audience: ['pmf', 'quality'], cross: ['pmf', 'cross'], repeat: ['pmf', 'repeat'] };
   if (OLD[ui.tab]) [ui.tab, ui.sub] = OLD[ui.tab]; }
+// Who is signed in (email login), and the page's half of usage tracking.
+const auth = { mode: null, user: null, clientId: null, domains: [], busy: false, error: '' };
+const usage = { data: null, days: 30, loading: false, error: '' };
+async function apiFetch(url, opts) {
+  const r = await fetch(url, opts);
+  if (r.status === 401 && auth.mode === 'google') { auth.user = null; renderLogin(); throw new Error('Signed out'); }
+  return r;
+}
 const remember = () => { try { localStorage.setItem('khoj-ui', JSON.stringify({ tab: ui.tab, sub: ui.sub, win: ui.win, cat: ui.cat, live: ui.live, sig: ui.sig, showDone: ui.showDone })); } catch {} };
 
 const $ = (id) => document.getElementById(id);
@@ -81,7 +89,7 @@ async function load(pull = true, force = false) {
     let names = [];
     const failures = [];
     if (pull) {
-      const r = await fetch('/api/sources');
+      const r = await apiFetch('/api/sources');
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
       names = (await r.json()).sources;
     }
@@ -94,7 +102,7 @@ async function load(pull = true, force = false) {
       // One slow or failing question doesn't stop the page: it keeps that source's last good pull.
       let note;
       try {
-        const r = await fetch('/api/sources/' + names[i].name + (force ? '?force=1' : ''), { method: 'POST' });
+        const r = await apiFetch('/api/sources/' + names[i].name + (force ? '?force=1' : ''), { method: 'POST' });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(body.error || (r.status === 504 || r.status === 502 ? 'timed out' : r.statusText));
         note = body.reused ? `${int(body.rows)} rows · from ${fmtWhen(body.loadedAt)}` : body.daily
@@ -108,7 +116,7 @@ async function load(pull = true, force = false) {
       progress.steps[i].note = note;
     }
     setStep(progress.steps.length - 1);
-    const res = await fetch('/api/state');
+    const res = await apiFetch('/api/state');
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
     ui.data = await res.json();
     if (failures.length) ui.msg = `Some questions didn't load: ${failures.join(' · ')}`;
@@ -125,9 +133,10 @@ function renderChrome() {
   const d = ui.data;
   $('cats').innerHTML = ['All', ...CATS].map((c) => `<button type="button" class="pill" data-cat="${esc(c)}" aria-pressed="${c === ui.cat}">${c === 'All' ? 'All test categories' : esc(c)}</button>`).join('');
   const open = d ? d.tasks.filter((t) => !t.done && inCat(t.category)).length : 0;
-  const tabs = [['status', 'Overall Status', ''], ['plan', 'Scaling Plan & Status', ''], ['pmf', 'PMF View', ''], ['rules', 'Rules', ''], ['tasks', 'Task log', open ? `${open} open` : '']];
+  const tabs = [['status', 'Overall Status', ''], ['plan', 'Scaling Plan & Status', ''], ['pmf', 'PMF View', ''], ['rules', 'Rules', ''], ['tasks', 'Task log', open ? `${open} open` : ''], ...(auth.user?.admin ? [['usage', 'Usage', '']] : [])];
   $('cats').style.display = (ui.tab === 'pmf' && ui.sub === 'hits') || ui.tab === 'tasks' ? '' : 'none';
   $('tabs').innerHTML = tabs.map(([k, l, b]) => `<button type="button" class="tab" role="tab" data-tab="${k}" aria-selected="${k === ui.tab}">${l}${b ? ' ' + chip('orange', b) : ''}</button>`).join('');
+  $('who').innerHTML = auth.user ? `<span class="small muted">${esc(auth.user.email)}</span><button type="button" class="btn btn-quiet" id="signOut">Sign out</button>` : '';
   $('refresh').disabled = ui.busy;
   if (!ui.busy) $('refresh').textContent = 'Refresh from Metabase';
   $('freshness').textContent = d ? `Data ${new Date(d.meta.loadedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
@@ -155,13 +164,15 @@ function renderChrome() {
 }
 
 function render() {
+  if (auth.mode === 'google' && !auth.user) return renderLogin();
   renderChrome();
   const d = ui.data;
   if (!d) {
     if (!ui.busy) $('view').innerHTML = `<div class="card"><p>Nothing loaded yet.</p><p><button type="button" class="btn btn-primary" id="retry">Try again</button></p></div>`;
     return;
   }
-  const view = { status: viewStatus, plan: viewPlan, pmf: viewPmf, tasks: viewTasks, rules: viewRules }[ui.tab] || viewStatus;
+  if (ui.tab === 'usage' && !auth.user?.admin) ui.tab = 'status';
+  const view = { status: viewStatus, plan: viewPlan, pmf: viewPmf, tasks: viewTasks, rules: viewRules, usage: viewUsage }[ui.tab] || viewStatus;
   $('view').innerHTML = `<div class="view">${view(d)}</div>`;
 }
 
@@ -596,7 +607,7 @@ async function loadCustomers() {
   if (ui.custLoading) return;
   ui.custLoading = true;
   try {
-    const r = await fetch('/api/customers');
+    const r = await apiFetch('/api/customers');
     ui.custRows = r.ok ? (await r.json()).rows || [] : [];
   } catch { ui.custRows = []; }
   ui.custLoading = false;
@@ -1275,6 +1286,149 @@ function viewRules(d) {
   </form>` + sourcesCard(d);
 }
 
+// ---------- sign in ----------
+function renderLogin() {
+  document.body.classList.add('signed-out');
+  const domains = auth.domains.map((d) => '@' + d).join(' or ');
+  $('view').innerHTML = `<div class="login card">
+    <div><h2 style="font-size:20px">Sign in</h2><p class="muted small" style="margin-top:4px">Use your ${esc(domains || 'work')} Google account.</p></div>
+    ${auth.error ? `<div class="notice notice-orange" role="alert">${esc(auth.error)}</div>` : ''}
+    <div id="googleButton" class="google-button">${auth.busy ? '<span class="muted small">Signing in…</span>' : ''}</div>
+  </div>`;
+  if (!auth.busy) showGoogleButton();
+}
+
+// Google Identity Services: loaded only when sign-in is needed; Google calls back with a signed ID token.
+let gsi = null;
+function loadGsi() {
+  gsi ||= new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true;
+    sc.onload = () => resolve(window.google.accounts.id);
+    sc.onerror = () => { gsi = null; reject(new Error('Could not load Google sign-in. Check your connection and reload.')); };
+    document.head.appendChild(sc);
+  }).then((id) => { id.initialize({ client_id: auth.clientId, callback: onGoogleCredential, ux_mode: 'popup', auto_select: false }); return id; });
+  return gsi;
+}
+async function showGoogleButton() {
+  try {
+    const id = await loadGsi();
+    const box = $('googleButton');
+    if (box) id.renderButton(box, { theme: 'outline', size: 'large', text: 'signin_with', shape: 'rectangular', logo_alignment: 'left', width: Math.min(340, box.clientWidth || 340) });
+  } catch (e) { auth.error = e.message; const box = $('googleButton'); if (box) box.innerHTML = `<span class="bad small">${esc(e.message)}</span>`; }
+}
+async function onGoogleCredential({ credential }) {
+  auth.busy = true; auth.error = ''; renderLogin();
+  try {
+    const r = await fetch('/api/auth/google', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ credential }) });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.error || r.statusText);
+    auth.user = out.user;
+  } catch (e) { auth.error = e.message; }
+  auth.busy = false;
+  if (auth.user) boot(); else renderLogin();
+}
+
+async function boot() {
+  try {
+    const r = await fetch('/api/auth/me');
+    const me = r.ok ? await r.json() : { mode: 'open' };
+    Object.assign(auth, { mode: me.mode, user: me.user, clientId: me.googleClientId, domains: me.domains || [] });
+    if (me.removed) auth.error = 'This account no longer has access.';
+  } catch { auth.mode = 'open'; }
+  if (auth.mode === 'google' && !auth.user) return renderLogin();
+  document.body.classList.remove('signed-out');
+  track('open', { tab: tabKey() });
+  load();
+}
+
+// ---------- usage tracking (page side) ----------
+// Sends: page open, each tab view, Refresh clicks, and active time per tab (15-second ticks while the tab is visible
+// and someone moved, typed or scrolled in the last 2 minutes). Batched every 2 minutes and when the page is hidden.
+const SESSION = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const queue = [];
+const activeSec = {};
+let lastInput = Date.now();
+const tabKey = () => (ui.tab === 'pmf' ? 'pmf/' + ui.sub : ui.tab);
+function track(type, extra = {}) { if (auth.mode === 'google' && auth.user) queue.push({ type, ...extra }); }
+function flushUsage(beacon = false) {
+  if (!auth.user) return Promise.resolve();
+  const events = queue.splice(0);
+  for (const [tab, sec] of Object.entries(activeSec)) { events.push({ type: 'active', tab, sec }); delete activeSec[tab]; }
+  if (!events.length) return Promise.resolve();
+  const body = JSON.stringify({ session: SESSION, events });
+  if (beacon && navigator.sendBeacon) return Promise.resolve(navigator.sendBeacon('/api/usage/events', new Blob([body], { type: 'application/json' })));
+  return fetch('/api/usage/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true }).catch(() => {});
+}
+for (const ev of ['pointermove', 'keydown', 'scroll', 'click', 'touchstart']) addEventListener(ev, () => { lastInput = Date.now(); }, { passive: true, capture: true });
+setInterval(() => {
+  if (auth.user && document.visibilityState === 'visible' && Date.now() - lastInput < 120_000) { const k = tabKey(); activeSec[k] = (activeSec[k] || 0) + 15; }
+}, 15_000);
+setInterval(() => flushUsage(), 120_000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushUsage(true); });
+addEventListener('pagehide', () => flushUsage(true));
+
+// ---------- Usage (admins) ----------
+const TAB_NAMES = { status: 'Overall Status', plan: 'Scaling Plan & Status', rules: 'Rules', tasks: 'Task log', usage: 'Usage', pmf: 'PMF View' };
+const tabName = (k) => (k?.startsWith('pmf/') ? `PMF · ${(PMF_SUBS.find(([s]) => s === k.slice(4)) || [, k.slice(4)])[1]}` : TAB_NAMES[k] || k || '—');
+const fmtMin = (m) => (!m ? '—' : m < 60 ? `${m} min` : `${(m / 60).toFixed(m < 600 ? 1 : 0)} h`);
+const EVENT_WORDS = { login: 'Signed in', logout: 'Signed out', open: 'Opened the dashboard', refresh: 'Refreshed from Metabase', task: 'Task', rules: 'Rules', plan: 'Plan', csv: 'Downloaded CSV', repull: 'Asked for a re-pull' };
+
+async function loadUsage() {
+  usage.loading = true; usage.error = ''; render();
+  try {
+    await flushUsage();
+    const r = await apiFetch('/api/usage?days=' + usage.days);
+    const out = await r.json();
+    if (!r.ok) throw new Error(out.error || r.statusText);
+    usage.data = out;
+  } catch (e) { usage.error = e.message; }
+  usage.loading = false;
+  if (ui.tab === 'usage') render();
+}
+
+function viewUsage() {
+  const U = usage.data;
+  if (!U && !usage.loading && !usage.error) { setTimeout(loadUsage); }
+  const head = `<div class="card-head"><div><h2 style="font-size:20px">Usage</h2><span class="muted small">Who signs in, how often, where they spend time and what they change. Times in IST.</span></div>
+    <div style="flex-direction:row;gap:8px;align-items:center;flex-wrap:wrap"><div class="seg-tabs">${[7, 30, 90].map((n) => `<button type="button" class="seg" data-udays="${n}" aria-pressed="${n === usage.days}">${n} days</button>`).join('')}</div>
+    <a class="btn" style="display:inline-flex;align-items:center;text-decoration:none;color:inherit" href="/api/usage.csv?days=${usage.days}">Download events (CSV)</a></div></div>`;
+  if (usage.error) return `<div class="card">${head}<div class="notice notice-orange">Could not load usage: ${esc(usage.error)}</div></div>`;
+  if (!U) return `<div class="card">${head}<p class="muted">Loading…</p></div>`;
+  const T = U.totals, seen = U.users.filter((u) => u.lastSeen);
+  const kpi = (label, value, sub = '') => `<div class="kpi"><span class="label">${esc(label)}</span><span class="value num">${value}</span>${sub ? `<span class="sub">${sub}</span>` : ''}</div>`;
+  const lab = U.daily.map((x) => shortDate(x.date));
+  const acts = (a) => [['task', 'tick', 'ticks'], ['rules', 'rule edit', 'rule edits'], ['plan', 'plan edit', 'plan edits'], ['refresh', 'refresh', 'refreshes'], ['csv', 'CSV', 'CSVs']].filter(([k]) => a[k]).map(([k, one, many]) => `${a[k]} ${a[k] === 1 ? one : many}`).join(' · ') || '<span class="muted">—</span>';
+  const people = U.users.map((u) => `<tr><td><div class="prod"><span class="name">${esc(u.email)}</span>${U.access.admins.includes(u.email) ? '<span class="small muted">admin</span>' : ''}</div></td>
+    <td class="nowrap">${u.lastSeen ? esc(fmtWhen(u.lastSeen)) : '<span class="muted">Never signed in</span>'}</td>
+    <td class="r num">${u.lastSeen ? `${u.daysActive7} / ${u.daysActive}` : '—'}</td><td class="r num">${u.sessions || '—'}</td><td class="r num">${u.logins || '—'}</td>
+    <td class="r num nowrap">${fmtMin(u.activeMin7)} / ${fmtMin(u.activeMin)}</td><td class="nowrap">${esc(u.topTab ? tabName(u.topTab) : '—')}</td><td class="wrap-cell small">${acts(u.actions)}</td></tr>`).join('');
+  const maxTab = Math.max(1, ...U.tabs.map((t) => t.activeMin));
+  const tabs = U.tabs.map((t) => `<tr><td class="nowrap">${esc(tabName(t.tab))}</td><td style="width:28%"><div class="bar" style="min-width:60px"><span style="width:${(t.activeMin / maxTab) * 100}%;background:var(--blue)"></span></div></td><td class="r num">${fmtMin(t.activeMin)}</td><td class="r num">${t.views}</td><td class="r num">${t.users}</td></tr>`).join('');
+  const recent = U.recent.map((e) => `<tr><td class="nowrap small">${esc(fmtWhen(e.at))}</td><td class="nowrap">${esc(e.email)}</td><td class="wrap-cell">${esc(EVENT_WORDS[e.type] || e.type)}${e.detail ? ` <span class="muted">· ${esc(e.detail)}</span>` : ''}</td></tr>`).join('');
+  const A = U.access, envChips = (xs) => (xs.length ? xs.map((x) => chip('muted', x)).join(' ') : '<span class="muted small">none</span>');
+  const denied = U.denied.map((x) => `<tr><td class="nowrap">${esc(x.email)}</td><td class="r num">${x.tries}</td><td class="nowrap small">${esc(fmtWhen(x.lastAt))}</td></tr>`).join('');
+  return `<div class="card">${head}
+    <div class="kpis kpis-7">${kpi('Active today', T.usersToday)}${kpi('Active, last 7 days', T.users7, `of ${T.people} with access or seen`)}${kpi(`Active, last ${U.days} days`, T.usersWindow)}${kpi('Sessions, last 7 days', T.sessions7)}${kpi('Active time, last 7 days', fmtMin(T.activeMin7), 'time with the page open and in use')}${kpi('Actions, last 7 days', T.actions7, 'ticks, rule & plan edits, refreshes')}</div>
+    <div class="grid-2"><div><div class="group-title">People active per day</div>${chartSvg({ labels: lab, bars: U.daily.map((x) => x.users), yFmt: (v) => Math.round(v), barLabel: 'people', barOpacity: 0.5 })}</div>
+      <div><div class="group-title">Active time per day</div>${chartSvg({ labels: lab, bars: U.daily.map((x) => x.activeMin), yFmt: (v) => fmtMin(Math.round(v)), barColor: 'var(--green)', barOpacity: 0.5 })}</div></div>
+  </div>
+  <div class="card"><div class="card-head"><div><h2>People</h2><span class="muted small">${seen.length} signed in during the last ${U.days} days. Days and time: last 7 days / last ${U.days}.</span></div></div>
+    <div class="table-box"><table><thead><tr><th>Person</th><th>Last seen</th><th class="r">Days active</th><th class="r">Sessions</th><th class="r">Sign-ins</th><th class="r">Active time</th><th>Most used tab</th><th>Actions</th></tr></thead><tbody>${people || '<tr><td colspan="8" class="muted">Nobody yet.</td></tr>'}</tbody></table></div></div>
+  <div class="grid-2">
+    <div class="card"><div class="card-head"><div><h2>Where time goes</h2><span class="muted small">Last ${U.days} days</span></div></div>
+      <div class="table-box"><table><thead><tr><th>Tab</th><th></th><th class="r">Active time</th><th class="r">Views</th><th class="r">People</th></tr></thead><tbody>${tabs || '<tr><td colspan="5" class="muted">No tab views yet.</td></tr>'}</tbody></table></div></div>
+    <div class="card"><div class="card-head"><div><h2>Recent activity</h2><span class="muted small">Sign-ins and changes, newest first</span></div></div>
+      <div class="table-box" style="max-height:420px;overflow-y:auto"><table><tbody>${recent || '<tr><td class="muted">Nothing yet.</td></tr>'}</tbody></table></div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><div class="card-head"><div><h2>Blocked sign-ins</h2><span class="muted small">Google accounts outside the allowed domains that tried to sign in, last ${U.days} days</span></div></div>
+      <div class="table-box"><table><thead><tr><th>Account</th><th class="r">Tries</th><th>Last try</th></tr></thead><tbody>${denied || '<tr><td colspan="3" class="muted">None.</td></tr>'}</tbody></table></div></div>
+    <div class="card"><div class="card-head"><div><h2>Access</h2><span class="muted small">Set in Netlify environment variables</span></div></div>
+      <div class="small" style="display:flex;flex-direction:column;gap:10px"><div>Allowed domains (Google Workspace): ${envChips(A.domains)}</div><div>Admins, who see this tab: ${envChips(A.admins)}</div></div></div>
+  </div>`;
+}
+
 // ---------- events ----------
 let custSearchTimer = null;
 document.addEventListener('input', (e) => {
@@ -1290,26 +1444,29 @@ document.addEventListener('input', (e) => {
   }
 });
 document.addEventListener('click', async (e) => {
+  if (e.target.closest('#signOut')) { flushUsage(); await fetch('/api/auth/logout', { method: 'POST' }); location.reload(); return; }
+  const ud = e.target.closest('[data-udays]');
+  if (ud) { usage.days = Number(ud.dataset.udays); usage.data = null; loadUsage(); return; }
   const rp = e.target.closest('[data-repull]');
-  if (rp) { await fetch(`/api/sources/${rp.dataset.repull}/repull`, { method: 'POST' }); ui.repulled = { ...(ui.repulled || {}), [rp.dataset.repull]: true }; render(); return; }
+  if (rp) { await apiFetch(`/api/sources/${rp.dataset.repull}/repull`, { method: 'POST' }); ui.repulled = { ...(ui.repulled || {}), [rp.dataset.repull]: true }; render(); return; }
   const pg = e.target.closest('[data-cpage]');
   if (pg) { custUi.page += Number(pg.dataset.cpage); $('custTable').innerHTML = custTableInner(); $('custTable').scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
   const t = e.target.closest('[data-cat],[data-tab],[data-sub],[data-win],[data-live],#refresh,#retry,#resetRules,#resetPlan');
   if (!t) return;
   if (t.dataset.cat) { ui.cat = t.dataset.cat; remember(); render(); }
-  else if (t.dataset.tab) { ui.tab = t.dataset.tab; remember(); render(); }
-  else if (t.dataset.sub) { ui.sub = t.dataset.sub; remember(); render(); }
+  else if (t.dataset.tab) { if (t.dataset.tab === 'usage') usage.data = null; ui.tab = t.dataset.tab; remember(); render(); track('view', { tab: tabKey() }); }
+  else if (t.dataset.sub) { ui.sub = t.dataset.sub; remember(); render(); track('view', { tab: tabKey() }); }
   else if (t.dataset.win) { ui.win = t.dataset.win; remember(); render(); }
   else if (t.dataset.live) { ui.live = t.dataset.live; remember(); render(); }
-  else if (t.id === 'refresh' || t.id === 'retry') load(true, true);
+  else if (t.id === 'refresh' || t.id === 'retry') { track('refresh', { tab: tabKey() }); load(true, true); }
   else if (t.id === 'resetPlan') {
     if (!confirm('Reset the plan to the default targets?')) return;
-    await fetch('/api/plan', { method: 'DELETE' });
+    await apiFetch('/api/plan', { method: 'DELETE' });
     load(false);
   }
   else if (t.id === 'resetRules') {
     if (!confirm('Reset every rule to its default?')) return;
-    await fetch('/api/settings', { method: 'DELETE' });
+    await apiFetch('/api/settings', { method: 'DELETE' });
     load(false);
   }
 });
@@ -1323,7 +1480,7 @@ document.addEventListener('change', async (e) => {
   const task = ui.data.tasks.find((x) => x.id === id);
   if (task) { task.done = done; task.auto = false; }
   render();
-  const res = await fetch('/api/tasks/' + encodeURIComponent(id), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ done }) });
+  const res = await apiFetch('/api/tasks/' + encodeURIComponent(id), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ done }) });
   if (!res.ok) { ui.msg = 'Could not save that tick. Refresh and try again.'; if (task) task.done = !done; render(); }
 });
 
@@ -1338,7 +1495,7 @@ document.addEventListener('submit', async (e) => {
       assumptions: { aov: v('a_aov'), successPct: v('a_successPct'), trialBudget: v('a_trialBudget'), trialDays: v('a_trialDays'), winnerDas: v('a_winnerDas'), winnerLifeWeeks: v('a_winnerLifeWeeks'),
         winnersShare: v('a_winnersShare'), googleShare: v('a_googleShare'), otherShare: v('a_otherShare'),
         sgmv: { testing: v('s_testing'), winners: v('s_winners'), google: v('s_google'), metaOther: v('s_metaOther') } } };
-    const res = await fetch('/api/plan', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await apiFetch('/api/plan', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     ui.note = res.ok ? 'Plan saved.' : ''; if (!res.ok) ui.msg = 'Could not save the plan.';
     await load(false);
     return;
@@ -1351,10 +1508,10 @@ document.addEventListener('submit', async (e) => {
     body[input.name] = Array.isArray(def) ? input.value.split(',').map((x) => Number(x.trim())).filter((x) => Number.isFinite(x) && x > 0) : input.value;
   }
   ui.saving = true; render();
-  const res = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const res = await apiFetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   ui.saving = false;
   if (!res.ok) ui.msg = 'Could not save rules.';
   await load(false);
 });
 
-load();
+boot();

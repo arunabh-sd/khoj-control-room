@@ -12,6 +12,8 @@ import { compute, todayIST, day } from './engine.js';
 import { addDaysIST, mondayOf, parseDaywise, aggDays, predictRto, rtoForMix } from './overview.js';
 import { normalisePlan } from './plan.js';
 import { DEFAULT_SETTINGS, SETTING_LABELS, mergeSettings } from './rules.js';
+import { createAuth, envAccess, googleClientId } from './auth.js';
+import { event, pageEvents, summarise, usageCsv, addDay, istDay as istDayOf } from './usage.js';
 
 // Background pulls (Netlify background functions run up to 15 minutes) are triggered by the scheduled functions with
 // a token derived from the Metabase key, so nobody else can start them and no extra variable is needed.
@@ -55,8 +57,9 @@ function bundledFallback(name) {
 // the first page load pulls the page-load questions instead of reusing an older pull.
 const DATA_VERSION = '2026-10-27.2';
 
-export function createApi(store) {
+export function createApi(store, { googleKeys } = {}) {
   const mem = {};   // warm-instance copy of the last Metabase pull per source
+  const auth = createAuth(store, googleKeys ? { keys: googleKeys } : {});
   let customerTable = null;
 
   const istDay = (iso) => new Date(new Date(iso).getTime() + 330 * 60000).toISOString().slice(0, 10);
@@ -304,12 +307,44 @@ export function createApi(store) {
     status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra }
   });
 
-  function authorised(req) {
-    const password = process.env.DASHBOARD_PASSWORD || '';
-    if (!password) return true;
-    const [scheme, encoded] = String(req.headers.get('authorization') || '').split(' ');
-    if (scheme !== 'Basic' || !encoded) return false;
-    return Buffer.from(encoded, 'base64').toString().split(':').slice(1).join(':') === password;
+  // Usage is only kept with Google sign-in on (every event has a person). A failed write never fails the request.
+  const track = async (email, type, extra) => {
+    if (!email || !store.appendUsage) return;
+    try { await store.appendUsage([event(email, type, extra)]); } catch (e) { console.error('usage', e.message); }
+  };
+
+  // Sign-in endpoints work without a session; everything else under /api needs one.
+  async function handleAuth(req, p, who) {
+    if (p === '/api/auth/me' && req.method === 'GET') return json(200, { mode: who.mode, user: who.user, removed: !!who.removed, googleClientId: who.mode === 'google' ? googleClientId() : null, domains: who.mode === 'google' ? envAccess().domains : [] });
+    if (who.mode !== 'google') return json(404, { error: 'Google sign-in is not turned on' });
+    if (p === '/api/auth/google' && req.method === 'POST') {
+      const body = await readJson(req, 8000);
+      const r = await auth.signInWithGoogle(body.credential);
+      if (!r.ok) {
+        // Someone outside the allowed domains tried: kept so admins can see it.
+        if (r.email) await track(r.email, 'denied', { detail: r.error });
+        return json(r.status, { error: r.error });
+      }
+      await track(r.user.email, 'login');
+      return json(200, { ok: true, user: r.user }, { 'set-cookie': auth.setCookie(req, r.token) });
+    }
+    if (p === '/api/auth/logout' && req.method === 'POST') {
+      await track(who.user?.email, 'logout');
+      return json(200, { ok: true }, { 'set-cookie': auth.clearCookie(req) });
+    }
+    return json(404, { error: 'Not found' });
+  }
+
+  // Admin only: the usage report and its raw events as CSV.
+  async function handleAdmin(req, p, url) {
+    const days = Math.min(90, Math.max(1, Number(url.searchParams.get('days')) || 30));
+    const since = new Date(addDay(istDayOf(new Date().toISOString()), -(days - 1)) + 'T00:00:00+05:30').toISOString();
+    const events = store.listUsage ? await store.listUsage(since) : [];
+    if (p === '/api/usage' && req.method === 'GET') return json(200, { ...summarise(events, { days, people: envAccess().admins }), access: envAccess() });
+    if (p === '/api/usage.csv' && req.method === 'GET') {
+      return new Response(usageCsv(events), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="khoj-usage-${days}d.csv"`, 'cache-control': 'no-store' } });
+    }
+    return null;
   }
 
   async function readJson(req, limit = 100_000) {
@@ -322,7 +357,20 @@ export function createApi(store) {
     const url = new URL(req.url);
     const p = url.pathname;
     if (p === '/healthz' || p === '/api/healthz') return json(200, { ok: true, store: store.kind });
-    if (!authorised(req)) return new Response('Password required', { status: 401, headers: { 'www-authenticate': 'Basic realm="Khoj Control Room"' } });
+    const who = await auth.identify(req);
+    if (p.startsWith('/api/auth/')) return handleAuth(req, p, who);
+    if (!who.ok) {
+      if (who.mode === 'password') return new Response('Password required', { status: 401, headers: { 'www-authenticate': 'Basic realm="Khoj Control Room"' } });
+      return json(401, { error: 'Sign in to continue', login: true });
+    }
+    if (p === '/api/usage/events' && req.method === 'POST') {
+      if (who.user && store.appendUsage) { const ev = pageEvents(who.user.email, await readJson(req, 50_000)); if (ev.length) await store.appendUsage(ev); }
+      return json(200, { ok: true });
+    }
+    if (p === '/api/usage' || p === '/api/usage.csv') {
+      if (!who.user?.admin) return json(403, { error: 'Only admins can see usage' });
+      return (await handleAdmin(req, p, url)) || json(404, { error: 'Not found' });
+    }
 
     if (p === '/api/sources' && req.method === 'GET') return json(200, { sources: SOURCE_NAMES.map((n) => ({ name: n, label: SOURCE_LABELS[n] })) });
     // Ask the scheduled job to pull a scheduled question again on its next check (e.g. after editing the question).
@@ -331,6 +379,7 @@ export function createApi(store) {
       if (!DAILY_SOURCES.includes(repull[1])) return json(404, { error: 'Not a scheduled question' });
       await setKV('meta:' + repull[1], { loadedAt: null, status: 'repull' });
       await setKV('tries:' + repull[1], { period: null, n: 0 });
+      await track(who.user?.email, 'repull', { detail: repull[1] });
       return json(200, { ok: true });
     }
     // The rows the dashboard is using for a source, as CSV (for checking the numbers or deeper analysis offline).
@@ -341,6 +390,7 @@ export function createApi(store) {
       const cols = [...new Set(rows.slice(0, 2000).flatMap((r) => Object.keys(r)))];
       const cell = (v) => { const s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
       const body = [cols.join(','), ...rows.map((r) => cols.map((c) => cell(r[c])).join(','))].join('\n');
+      await track(who.user?.email, 'csv', { detail: csvMatch[1] });
       return new Response(body, { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${csvMatch[1]}.csv"`, 'cache-control': 'no-store' } });
     }
     const srcMatch = p.match(/^\/api\/sources\/([A-Za-z]+)$/);
@@ -359,28 +409,35 @@ export function createApi(store) {
     if (taskMatch && req.method === 'POST') {
       const body = await readJson(req);
       const ok = await store.setTaskDone(decodeURIComponent(taskMatch[1]), !!body.done);
+      if (ok) await track(who.user?.email, 'task', { detail: `${body.done ? 'done' : 'undone'}: ${decodeURIComponent(taskMatch[1])}` });
       return ok ? json(200, { ok: true }) : json(404, { error: 'Task not found' });
     }
     if (p === '/api/plan' && req.method === 'PUT') {
       const body = await readJson(req, 200_000);
       const plan = normalisePlan({ ...body, saved: true });
       if (store.setKV) await store.setKV('plan', plan);
+      await track(who.user?.email, 'plan', { detail: 'saved' });
       return json(200, { ok: true, plan });
     }
     if (p === '/api/plan' && req.method === 'DELETE') {
       if (store.setKV) await store.setKV('plan', null);
+      await track(who.user?.email, 'plan', { detail: 'reset to defaults' });
       return json(200, { ok: true });
     }
     if (p === '/api/settings' && req.method === 'PUT') {
       const incoming = await readJson(req);
       const merged = mergeSettings(incoming);
+      const before = mergeSettings(await store.getSettings());
       const toSave = {};
       for (const k of Object.keys(incoming)) if (k in DEFAULT_SETTINGS) toSave[k] = merged[k];
       await store.saveSettings(toSave);
+      const changed = Object.keys(toSave).filter((k) => JSON.stringify(toSave[k]) !== JSON.stringify(before[k]));
+      await track(who.user?.email, 'rules', { detail: changed.length ? 'changed: ' + changed.map((k) => SETTING_LABELS[k]?.[1] || k).join(', ') : 'saved, no change' });
       return json(200, { ok: true, settings: mergeSettings(await store.getSettings()) });
     }
     if (p === '/api/settings' && req.method === 'DELETE') {
       await store.saveSettings({ ...DEFAULT_SETTINGS });
+      await track(who.user?.email, 'rules', { detail: 'reset to defaults' });
       return json(200, { ok: true, settings: DEFAULT_SETTINGS });
     }
     return json(404, { error: 'Not found' });

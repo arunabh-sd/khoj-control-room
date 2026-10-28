@@ -1,5 +1,7 @@
-// Persistence for settings, tasks (done ticks) and the decision log.
+// Persistence for settings, tasks (done ticks), the decision log and usage events.
 // Postgres when DATABASE_URL is set; otherwise an in-memory store (lost on restart).
+import { istDay, addDay, KEEP_DAYS } from './usage.js';
+
 const SCHEMA = `
 create table if not exists settings (key text primary key, value jsonb not null);
 create table if not exists tasks (
@@ -28,6 +30,17 @@ create table if not exists decisions (
 );
 create index if not exists decisions_at on decisions (at desc);
 create table if not exists kv (key text primary key, value jsonb not null, updated_at timestamptz not null default now());
+create table if not exists usage_events (
+  id text primary key,
+  at timestamptz not null,
+  email text,
+  type text not null,
+  session text,
+  tab text,
+  detail text,
+  sec integer
+);
+create index if not exists usage_events_at on usage_events (at desc);
 `;
 
 function memoryStore() {
@@ -35,6 +48,7 @@ function memoryStore() {
   const settings = {};
   const tasks = new Map();
   const decisions = [];
+  let usage = [];
   return {
     kind: 'memory',
     async init() {},
@@ -71,7 +85,9 @@ function memoryStore() {
         decisions.push({ ...d, at: new Date().toISOString() });
       }
     },
-    async listDecisions() { return [...decisions].sort((a, b) => (a.at < b.at ? 1 : -1)); }
+    async listDecisions() { return [...decisions].sort((a, b) => (a.at < b.at ? 1 : -1)); },
+    async appendUsage(events) { usage.push(...structuredClone(events)); if (usage.length > 50_000) usage = usage.slice(-50_000); },
+    async listUsage(since) { return usage.filter((e) => e.at >= since); }
   };
 }
 
@@ -148,11 +164,24 @@ function pgStore(url) {
     async listDecisions() {
       const { rows } = await pool.query('select * from decisions order by at desc limit 5000');
       return rows;
+    },
+    async appendUsage(events) {
+      if (!events.length) return;
+      const cols = ['id', 'at', 'email', 'type', 'session', 'tab', 'detail', 'sec'];
+      const values = events.map((_, i) => `(${cols.map((__, j) => '$' + (i * cols.length + j + 1)).join(',')})`).join(',');
+      await pool.query(`insert into usage_events (${cols.join(',')}) values ${values} on conflict (id) do nothing`, events.flatMap((e) => cols.map((c) => e[c] ?? null)));
+      if (Math.random() < 0.01) await pool.query(`delete from usage_events where at < now() - interval '${KEEP_DAYS} days'`);
+    },
+    async listUsage(since) {
+      const { rows } = await pool.query('select id, at, email, type, session, tab, detail, sec from usage_events where at >= $1 order by at', [since]);
+      return rows.map((r) => ({ ...r, at: new Date(r.at).toISOString() }));
     }
   };
 }
 
 // Netlify Blobs: three small JSON documents (settings, tasks, decisions) plus a cache of the Metabase results.
+// Usage events: each batch is its own blob (usage/<IST day>/<time>-<id>), so two people writing at once never overwrite
+// each other. A finished day's batches are folded into one document (usage-day/<day>) the next time the report reads it.
 function blobsStore() {
   let store;
   const KEEP_DONE_MS = 14 * 24 * 3600 * 1000;
@@ -211,7 +240,36 @@ function blobsStore() {
     async getCache(key) { return read('cache:' + key, null); },
     async setCache(key, value) { await write('cache:' + key, value); },
     async getKV(key) { return read('kv:' + key, null); },
-    async setKV(key, value) { await write('kv:' + key, value); }
+    async setKV(key, value) { await write('kv:' + key, value); },
+    async appendUsage(events) {
+      if (!events.length) return;
+      const at = events[0].at;
+      await write(`usage/${istDay(at)}/${at.replace(/[:.]/g, '')}-${events[0].id}`, events);
+    },
+    async listUsage(since) {
+      const today = istDay(new Date().toISOString());
+      const days = [];
+      for (let d = istDay(since); d <= today; d = addDay(d, 1)) days.push(d);
+      const perDay = await Promise.all(days.map(async (d) => {
+        const [folded, { blobs }] = await Promise.all([read('usage-day/' + d, []), store.list({ prefix: `usage/${d}/` })]);
+        if (!blobs.length) return folded;
+        const parts = (await Promise.all(blobs.map((b) => read(b.key, [])))).flat();
+        const seen = new Set(folded.map((e) => e.id));
+        const all = [...folded, ...parts.filter((e) => !seen.has(e.id))];
+        if (d < today) {
+          await write('usage-day/' + d, all);
+          await Promise.all(blobs.map((b) => store.delete(b.key)));
+        }
+        return all;
+      }));
+      // Drop folded days past the retention window.
+      if (Math.random() < 0.02) {
+        const { blobs } = await store.list({ prefix: 'usage-day/' });
+        const cutoff = addDay(today, -KEEP_DAYS);
+        await Promise.all(blobs.filter((b) => b.key.slice('usage-day/'.length) < cutoff).map((b) => store.delete(b.key)));
+      }
+      return perDay.flat().filter((e) => e.at >= since);
+    }
   };
 }
 
