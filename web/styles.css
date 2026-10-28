@@ -259,3 +259,5 @@ body.signed-out .top-actions, body.signed-out #tabs, body.signed-out #notices { 
 .login { max-width: 420px; margin: 48px auto 0; width: 100%; }
 .google-button { min-height: 44px; display: flex; align-items: center; }
 #freshness:empty { display: none; }
+.legal-links { text-align: center; padding: 8px 0 0; }
+.legal-links a { color: var(--muted); }

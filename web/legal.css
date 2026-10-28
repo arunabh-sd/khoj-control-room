@@ -1,0 +1,12 @@
+:root { --ground: #F4F4F1; --surface: #FFFFFF; --ink: #15171C; --muted: #5B6070; --line: #E1E1DC; --blue: #2A4BD7; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.6; }
+main { max-width: 720px; margin: 0 auto; padding: 40px 16px 64px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 28px; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+h1 { font-size: 26px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 24px 0 6px; }
+p, ul { margin: 0 0 10px; } ul { padding-left: 20px; }
+.muted { color: var(--muted); font-size: 13px; }
+a { color: var(--blue); }
+nav { margin-top: 20px; font-size: 13px; display: flex; gap: 16px; }

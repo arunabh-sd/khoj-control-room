@@ -1294,6 +1294,7 @@ function renderLogin() {
     <div><h2 style="font-size:20px">Sign in</h2><p class="muted small" style="margin-top:4px">Use your ${esc(domains || 'work')} Google account.</p></div>
     ${auth.error ? `<div class="notice notice-orange" role="alert">${esc(auth.error)}</div>` : ''}
     <div id="googleButton" class="google-button">${auth.busy ? '<span class="muted small">Signing in…</span>' : ''}</div>
+    <p class="muted small" style="margin:0">Internal use only. By signing in you agree to the <a href="/terms.html">terms of use</a>; see the <a href="/privacy.html">privacy notice</a>.</p>
   </div>`;
   if (!auth.busy) showGoogleButton();
 }
