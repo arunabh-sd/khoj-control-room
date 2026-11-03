@@ -132,7 +132,19 @@ export function createApi(store, { googleKeys } = {}) {
 
   async function refreshSource(name, opts = {}) {
     if ((name === 'pnl' || name === 'pnlWeeks') && !opts.paramSets && !process.env.DATA_DIR) opts = { ...opts, paramSets: await pnlParamSets(name) };
-    if (PHASE[name] === 2 && !opts.params) opts = { ...opts, params: await phase2Params(name) };
+    if (name === 'eventsWin' && !opts.paramSets && !process.env.DATA_DIR) {
+      // Before (N days up to the day before the change) and after (the day after the change to yesterday).
+      const settings = mergeSettings(await store.getSettings());
+      const change = day(settings.recoChangeDay), yest = addDaysIST(todayIST(), -1);
+      const base = await phase2Params('events');
+      const sets = [];
+      if (change) {
+        sets.push({ label: 'before', params: { ...base, from_day: addDaysIST(change, -Math.max(1, Number(settings.recoCompareDays) || 14)), to_day: addDaysIST(change, -1) } });
+        if (addDaysIST(change, 1) <= yest) sets.push({ label: 'after', params: { ...base, from_day: addDaysIST(change, 1), to_day: yest } });
+      }
+      opts = { ...opts, paramSets: sets, params: undefined };
+    }
+    if (PHASE[name] === 2 && !opts.params && !opts.paramSets) opts = { ...opts, params: await phase2Params(name) };
     const result = { ...(await loadOne(name, opts)), version: DATA_VERSION };
     if (result.status === 'error') {
       const prev = mem[name] || (await getKV('source:' + name));

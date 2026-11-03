@@ -42,6 +42,9 @@ export const DEFAULT_SETTINGS = {
   // Overall Status
   pnlRtoPct: 25,
   // Predicted RTO: COD and online RTO measured on Khoj orders placed in this window (blank = D-17 to D-10).
+  // Cross-selling: the day the recommendation logic changed (left out of both windows) and how many days to compare before it.
+  recoChangeDay: '2026-10-30',
+  recoCompareDays: 14,
   predRtoFrom: '2026-10-06',
   predRtoTo: '2026-10-13',
 
@@ -90,6 +93,8 @@ export const SETTING_LABELS = {
   signalWindowMin: ['Product signal', 'Performance window: at least this much recent spend (₹)'],
   metaSgmvFactor: ['Data', 'Ads question Spend/GMV correction: actual = reported × this'],
   pnlRtoPct: ['Overall Status', 'P&L: predicted RTO % for orders still in transit'],
+  recoChangeDay: ['Cross-selling', 'Recommendation change: day it went live (YYYY-MM-DD, left out of both windows)'],
+  recoCompareDays: ['Cross-selling', 'Days before the change to compare against'],
   predRtoFrom: ['Overall Status', 'Predicted RTO: measure on orders placed from (YYYY-MM-DD, blank = D-17)'],
   predRtoTo: ['Overall Status', 'Predicted RTO: … to (YYYY-MM-DD, blank = D-10)'],
   baseSpendNmv: ['PMF benchmarks', 'Base sellers: Spend/NMV %'],

@@ -32,6 +32,8 @@ const SOURCES = {
   // Phase 2: asked about Khoj plus the parent sellers of Khoj's ordered products (passed as {{parent_sellers}}),
   // so they run after products and order history, at half past the hour.
   events: { env: 'MB_Q_EVENTS', file: 'events.csv', label: 'Site sessions: Khoj vs parent sellers', everyHours: 24, phase: 2 },
+  // The same site-sessions question, run for the windows before and after a change (Rules: recoChangeDay).
+  eventsWin: { env: 'MB_Q_EVENTS', file: 'events_win.csv', label: 'Site sessions: before vs after the recommendation change', everyHours: 24, phase: 2, windowed: true },
   personalise: { env: 'MB_Q_PERSONALISE', file: 'personalise.csv', label: 'Khoj visitors: personalisation potential', everyHours: 24, phase: 2 },
   prodQuality: { env: 'MB_Q_PRODUCT_QUALITY', id: '17003', file: 'prod_quality.csv', label: 'Order quality: Khoj vs the same products on seller sites', everyHours: 24, phase: 2 },
   revisit: { env: 'MB_Q_REVISIT', id: '17018', file: 'revisit.csv', label: 'Visits after delivery: Khoj vs parent sellers', everyHours: 24, phase: 2 },
@@ -69,11 +71,16 @@ export async function loadOne(name, { timeoutMs, params, paramSets } = {}) {
     }
     const id = process.env[src.env] || (src.alt && process.env[src.alt]) || src.id || '';
     if (!id) return { status: 'missing', origin: `${src.env} not set`, rows: [], loadedAt };
+    if (src.windowed && !paramSets?.length) return { status: 'missing', origin: 'no window set (Rules → Cross-selling)', rows: [], loadedAt };
     let rows;
     if (paramSets?.length) {
       // One question, several parameter sets (e.g. P&L per date window): run them together, tag each row.
-      const parts = await Promise.all(paramSets.map(async (ps) => (await runCard(id, '', { timeoutMs, params: ps.params })).map((r) => ({ ...r, window: ps.label, window_start: ps.params.start_date, window_end: ps.params.end_date, window_rto: ps.params.rto_pct }))));
+      const warnings = [];
+      const parts = await Promise.all(paramSets.map(async (ps) => { const got = await runCard(id, '', { timeoutMs, params: ps.params }); if (got.warning) warnings.push(got.warning); return got.map((r) => ({ ...r, window: ps.label, window_start: ps.params.start_date ?? ps.params.from_day, window_end: ps.params.end_date ?? ps.params.to_day, window_rto: ps.params.rto_pct })); }));
+      // A windowed run that silently ignored its window would mislabel the data: treat it as a failure.
+      if (src.windowed && warnings.some((w) => /from_day|to_day/.test(w))) throw new Error(warnings[0]);
       rows = parts.flat();
+      if (warnings.length) rows.warning = warnings[0];
     } else rows = await runCard(id, src.params ? process.env[src.params] : '', { timeoutMs, params });
     const warning = rows.warning || null;
     const rawRows = rows.length;

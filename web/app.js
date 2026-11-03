@@ -345,7 +345,7 @@ function killReviewCard(d) {
 }
 
 function sourcesCard(d) {
-  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', daywise: 'Khoj day-wise', pnl: 'Khoj P&L (today to L7D)', pnlWeeks: 'Khoj P&L (weeks)', prodQuality: 'Order quality: Khoj vs same products on seller sites', events: 'Site sessions vs parent sellers', personalise: 'Visitor personalisation', benchmark: 'Repeat benchmark (parent sellers)' };
+  const label = { products: 'Products (hero base)', ads: 'Trial and scale ads', catalog: 'Product spend, PPO-distributed', adsetMap: 'Ad set → product map', universe: 'ShopDeck universe (PQ ≥ 3)', overlap: 'Khoj × parent seller overlap', history: 'Khoj buyers\' order history', browsing: 'Khoj buyers\' browsing', daywise: 'Khoj day-wise', pnl: 'Khoj P&L (today to L7D)', pnlWeeks: 'Khoj P&L (weeks)', prodQuality: 'Order quality: Khoj vs same products on seller sites', events: 'Site sessions vs parent sellers', eventsWin: 'Site sessions before/after the reco change', personalise: 'Visitor personalisation', benchmark: 'Repeat benchmark (parent sellers)' };
   return `<section class="card" aria-label="Data sources">
     <h2>Data sources</h2>
     <div class="sources">${Object.entries(d.meta.sources).map(([k, s]) => `<div class="source"><strong>${label[k]}</strong><span class="muted small">${esc(s.origin)}</span><span>${s.status === 'pulling' ? chip('blue', 'Pulling in the background') : s.fallback ? chip('amber', `Repo copy · ${fmtWhen(s.loadedAt)}`) : s.stale ? chip('amber', `Last pull ${fmtWhen(s.loadedAt)} · refresh failed`) : s.daily && s.status === 'ok' ? chip('green', `${int(s.rows)} rows · ${s.everyHours >= 24 ? 'daily' : `every ${s.everyHours} h`}, pulled ${fmtWhen(s.loadedAt)}`) : s.daily && s.status === 'missing' && s.origin === 'waiting for the daily pull' ? chip('amber', 'Waiting for the daily pull') : s.status === 'ok' ? chip('green', int(s.rows) + ' rows') : s.status === 'missing' ? chip('amber', 'Not connected') : chip('orange', 'Error')}</span>${s.error ? `<span class="small" style="color:var(--orange-fg)">${esc(s.error)}</span>` : ''}${s.rows ? `<a class="small" href="/api/sources/${esc(k)}.csv" download>Download the rows (CSV)</a>` : ''}${s.daily ? `<button type="button" class="btn" data-repull="${esc(k)}" style="align-self:flex-start;min-height:32px;padding:4px 10px;font-size:12px">${ui.repulled?.[k] ? 'Queued: next check within 5 min' : 'Pull again'}</button>` : ''}${s.columns && s.columns.length ? `<details><summary class="small">Columns received (${s.columns.length})</summary><ul class="small muted" style="margin:6px 0 0;padding-left:18px">${s.columns.map((c) => `<li><code>${esc(c)}</code> · ${esc((s.sample || {})[c] || '')}</li>`).join('')}</ul></details>` : ''}</div>`).join('')}</div>
@@ -767,6 +767,48 @@ function matchedRcaCard(S) {
   return card('Explore RCA', 'Why Khoj sessions explore less: root cause', `Product-matched: every Khoj session is compared with seller-site sessions that started on the same product, weighted to Khoj's first-product mix · ${int(M.products)} products, ${pc(M.coverage)} of Khoj sessions`, body);
 }
 
+// Before vs after the recommendation change (Rules → Cross-selling): Khoj's own numbers in each window, with the parent
+// sellers' sites (Khoj-order weighted) in the after window for reference.
+function recoChangeCard(d) {
+  const W = d.sessionsWin, ch = d.settings.recoChangeDay;
+  const title = `Since the recommendation change (${shortDate(ch)}, second half)`;
+  if (!W || !W.after) {
+    const src = d.meta.sources.eventsWin;
+    const why = !src || src.status === 'missing' ? 'waiting for the first before/after pull of the site sessions question (runs once a day in the background)' : src.error ? esc(src.error) : 'waiting for the after window';
+    return card('Recommendation change', title, '', `<p class="small muted" style="margin:0">${why}. It needs two Text variables on Q16724, <code>from_day</code> and <code>to_day</code> (the updated <code>sql/site_sessions.sql</code>).</p>`);
+  }
+  const B = W.before, A = W.after;
+  const m = (x, k) => x?.metrics?.find((r) => r.key === k) || null;
+  const mm = (x, k) => x?.matched?.metrics?.find((r) => r.key === k) || null;
+  const rows = [
+    { l: 'Products viewed per session', b: m(B, 'productsPerSession')?.khoj, a: m(A, 'productsPerSession')?.khoj, base: m(A, 'productsPerSession')?.bench, f: (v) => v.toFixed(2) },
+    { l: 'Sessions viewing 2+ products', b: m(B, 'multiProductPct')?.khoj, a: m(A, 'multiProductPct')?.khoj, base: m(A, 'multiProductPct')?.bench, f: (v) => pc(v, 1), pts: true },
+    { l: 'Products viewed per session, same landing products', b: mm(B, 'productsPerSession')?.khoj, a: mm(A, 'productsPerSession')?.khoj, base: mm(A, 'productsPerSession')?.bench, f: (v) => v.toFixed(2) },
+    { l: 'Sessions with a buy-now click', b: m(B, 'buyNowPct')?.khoj, a: m(A, 'buyNowPct')?.khoj, base: m(A, 'buyNowPct')?.bench, f: (v) => pc(v, 1), pts: true },
+    { l: 'Buy-now on a different product than the landing one', b: B?.beyond?.otherPct, a: A?.beyond?.otherPct, base: null, f: (v) => pc(v, 1), pts: true },
+    { l: '…from another seller', b: B?.beyond?.otherAnotherSellerPct, a: A?.beyond?.otherAnotherSellerPct, base: null, f: (v) => pc(v, 1), pts: true },
+    { l: 'Buy-now sessions with 2+ products clicked', b: m(B, 'multiBuyNowPct')?.khoj, a: m(A, 'multiBuyNowPct')?.khoj, base: m(A, 'multiBuyNowPct')?.bench, f: (v) => pc(v, 1), pts: true },
+    { l: 'Orders per 100 sessions', b: m(B, 'ordersPerSession')?.khoj, a: m(A, 'ordersPerSession')?.khoj, base: m(A, 'ordersPerSession')?.bench, f: (v) => v.toFixed(2) }
+  ];
+  const ok = (v) => v !== null && v !== undefined && Number.isFinite(v);
+  const chg = (r) => { if (!ok(r.a) || !ok(r.b)) return '<span class="muted">—</span>'; const dlt = r.pts ? r.a - r.b : r.b ? ((r.a - r.b) / r.b) * 100 : null; if (dlt === null) return '—'; return `<span class="${Math.abs(dlt) < (r.pts ? 0.3 : 2) ? 'muted' : dlt > 0 ? 'good' : 'bad'}">${dlt >= 0 ? '+' : '−'}${Math.abs(dlt).toFixed(r.pts ? 1 : 0)}${r.pts ? ' pts' : '%'}</span>`; };
+  const range = (x) => (x ? (x.from === x.to ? shortDate(x.from) : `${shortDate(x.from)}–${shortDate(x.to)}`) : '—');
+  const days = (x) => (x ? Math.round((new Date(x.to) - new Date(x.from)) / 86400000) + 1 : 0);
+  const kpis = kpiRow([
+    ['Products viewed / session', ok(rows[0].a) ? rows[0].f(rows[0].a) : '—', ok(rows[0].b) ? `before ${rows[0].f(rows[0].b)}` : ''],
+    ['Buy-now on a different product', ok(rows[4].a) ? rows[4].f(rows[4].a) : '—', ok(rows[4].b) ? `before ${rows[4].f(rows[4].b)}` : ''],
+    ['Sessions with buy-now', ok(rows[3].a) ? rows[3].f(rows[3].a) : '—', ok(rows[3].b) ? `before ${rows[3].f(rows[3].b)}` : ''],
+    ['Orders / 100 sessions', ok(rows[7].a) ? rows[7].f(rows[7].a) : '—', ok(rows[7].b) ? `before ${rows[7].f(rows[7].b)}` : '']
+  ]);
+  return card('Recommendation change', title, `Khoj sessions from ${range(A)} (${days(A)} day${days(A) > 1 ? 's' : ''}, ${int(A.khojSessions)} sessions) vs the ${days(B)} days before the change, ${range(B)} (${int(B?.khojSessions)} sessions) · ${shortDate(ch)} itself is left out`, kpis + tbl([
+    { h: 'Metric', v: (r) => esc(r.l) },
+    { h: `Before · ${range(B)}`, r: 1, v: (r) => (ok(r.b) ? r.f(r.b) : '—') },
+    { h: `After · ${range(A)}`, r: 1, v: (r) => (ok(r.a) ? `<strong>${r.f(r.a)}</strong>` : '—') },
+    { h: 'Change', r: 1, v: chg },
+    { h: 'Parent sellers, after', r: 1, v: (r) => (ok(r.base) ? `<span class="muted">${r.f(r.base)}</span>` : '<span class="muted">—</span>') }
+  ], rows.filter((r) => ok(r.a) || ok(r.b)), { min: 820 }) + `<p class="small muted" style="margin:0">The after window grows by a day with each daily pull; a few days of sessions can swing, so read the direction more than the exact gap. Change the date or comparison length in Rules → Cross-selling.</p>`);
+}
+
 function viewCross(d) {
   const S = d.sessions;
   const needs = planned('Cross-selling', 'Does an all-hero marketplace get people to explore and buy beyond the product in the ad?', [
@@ -796,7 +838,7 @@ function viewCross(d) {
     { h: 'Clicked buy-now on', v: (x) => `${esc(x.to)} <span class="muted small">${esc(x.toCat)}${x.sameSeller ? ' · same seller' : ''}</span>` },
     { h: 'Sessions', r: 1, v: (x) => int(x.sessions) }
   ], B.topPairs, { min: 760 }));
-  return explore + beyond + matchedRcaCard(S) + rcaCard(S);
+  return recoChangeCard(d) + explore + beyond + matchedRcaCard(S) + rcaCard(S);
 }
 
 // ---------- Charts (inline SVG, no library) ----------

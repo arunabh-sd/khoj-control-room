@@ -69,10 +69,11 @@ export async function runCard(cardId, paramStr = '', opts = {}) {
     try { const j = JSON.parse(text); msg = j.error || j.message || j.via?.find((v) => v.error)?.error || msg; } catch { /* not JSON */ }
     // The question doesn't declare a variable the dashboard sends: run it once without that variable, and say so.
     const tag = String(msg).match(/does not have a template tag named "([^"]+)"/);
-    if (tag && opts.params && tag[1] in opts.params && !opts.retried) {
+    if (tag && opts.params && tag[1] in opts.params && (opts.retried || 0) < 5) {
       const params = { ...opts.params }; delete params[tag[1]];
-      const rows = await runCard(cardId, paramStr, { ...opts, params, retried: true });
-      rows.warning = `Q${cardId} has no {{${tag[1]}}} variable, so it ran without it. Add a Text variable named ${tag[1]} to the question.`;
+      const rows = await runCard(cardId, paramStr, { ...opts, params, retried: (opts.retried || 0) + 1 });
+      rows.missingTags = [tag[1], ...(rows.missingTags || [])];
+      rows.warning = `Q${cardId} has no ${rows.missingTags.map((x) => `{{${x}}}`).join(', ')} variable${rows.missingTags.length > 1 ? 's' : ''}, so it ran without ${rows.missingTags.length > 1 ? 'them' : 'it'}. Add ${rows.missingTags.length > 1 ? 'Text variables' : 'a Text variable'} named ${rows.missingTags.join(', ')} to the question.`;
       return rows;
     }
     throw new Error(`Metabase card ${cardId} returned ${res.status}: ${String(msg).slice(0, 600)}`);

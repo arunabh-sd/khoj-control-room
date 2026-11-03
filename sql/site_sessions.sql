@@ -1,6 +1,8 @@
 -- Site sessions · Khoj vs the parent sellers' own sites, last 28 days (Q16724)
 -- {{parent_sellers}}: Metabase variable of type Text, not required. The dashboard fills it with the parent sellers
 -- of what Khoj has sold (comma-separated seller ids). Run by hand without it, only Khoj comes back.
+-- {{from_day}}, {{to_day}}: Metabase variables of type Text, not required, 'YYYY-MM-DD' (IST). Without them the
+-- window is the last 28 days to today; the dashboard sets them to compare before and after a change.
 --
 -- kind = 'seller'     : one row per seller, the session funnel (all visitors, and new visitors only)
 -- kind = 'landing'    : per seller × landing product (first product page opened) × new/returning visitor
@@ -21,7 +23,8 @@ ppo AS (
   FROM `events.product_page_opened` p
   JOIN sellers s ON p.seller_id = s.seller_id
   WHERE COALESCE(p.session_id, '') <> '' AND COALESCE(p.visitor_id, '') <> ''
-    AND DATE(p.created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 118 DAY)
+    AND DATE(p.created_at, 'Asia/Kolkata') >= DATE_SUB(COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{from_day}}),]] DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)), INTERVAL 90 DAY)
+    AND DATE(p.created_at, 'Asia/Kolkata') <= COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{to_day}}),]] CURRENT_DATE('Asia/Kolkata'))
 ),
 seen AS (
   SELECT seller_id, visitor_id, ARRAY_AGG(created_at ORDER BY created_at) AS opens_at
@@ -33,7 +36,7 @@ views AS (
          MIN(created_at) AS first_at, MAX(created_at) AS last_at, COUNT(*) AS opens,
          ANY_VALUE(utm_source) AS utm_source, ANY_VALUE(utm_medium) AS utm_medium, ANY_VALUE(device) AS device
   FROM ppo
-  WHERE DATE(created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+  WHERE DATE(created_at, 'Asia/Kolkata') BETWEEN COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{from_day}}),]] DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)) AND COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{to_day}}),]] CURRENT_DATE('Asia/Kolkata'))
   GROUP BY seller_id, session_id, product_id
 ),
 sessions0 AS (
@@ -68,7 +71,7 @@ buy_now AS (
   FROM `blitzscale-prod-project.events.buy_now_clicked` b
   JOIN sellers s ON b.seller_id = s.seller_id
   WHERE COALESCE(b.session_id, '') <> '' AND COALESCE(b.visitor_id, '') <> ''
-    AND DATE(b.created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+    AND DATE(b.created_at, 'Asia/Kolkata') BETWEEN COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{from_day}}),]] DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)) AND COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{to_day}}),]] CURRENT_DATE('Asia/Kolkata'))
   GROUP BY 1, 2, 3
 ),
 buy_now_sessions AS (
@@ -79,13 +82,13 @@ checkouts AS (
   FROM `events.checkout_initiated` c
   JOIN sellers s ON c.seller_id = s.seller_id
   WHERE COALESCE(c.session_id, '') <> '' AND COALESCE(c.visitor_id, '') <> ''
-    AND DATE(c.created_at, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+    AND DATE(c.created_at, 'Asia/Kolkata') BETWEEN COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{from_day}}),]] DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)) AND COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{to_day}}),]] CURRENT_DATE('Asia/Kolkata'))
 ),
 orders AS (
   SELECT oi.seller_id, COUNT(DISTINCT oi.seller_group_id) AS orders
   FROM `nushop.orderitems` oi
   JOIN sellers s ON oi.seller_id = s.seller_id
-  WHERE DATE(oi.createdat, 'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)
+  WHERE DATE(oi.createdat, 'Asia/Kolkata') BETWEEN COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{from_day}}),]] DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 28 DAY)) AND COALESCE([[SAFE.PARSE_DATE('%Y-%m-%d', {{to_day}}),]] CURRENT_DATE('Asia/Kolkata'))
     AND oi.seller_last_status NOT IN ('invalid', 'initiated', 'enqueued')
     AND oi.awb_no != 'None' AND oi.in_house_status != 'awb_expired'
     AND oi.reseller_id IS NULL

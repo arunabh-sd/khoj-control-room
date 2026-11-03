@@ -856,6 +856,13 @@ export function compute(src, s, history, today = todayIST()) {
   // ---------- Khoj vs parent sellers' own sites, weighted by Khoj orders (site events, repeat benchmark) ----------
   const weights = khojOrderWeights(src.history?.rows || [], s.khojSellerId, idx);
   const sessions = src.events?.rows?.length ? analyseEvents(src.events.rows, { khojSellerId: s.khojSellerId, weights, idx, khojToSellerProduct, sellerProductCat, historyRows: src.history?.rows || [] }) : null;
+  // Before vs after the recommendation change: the same analysis per window.
+  let sessionsWin = null;
+  if (src.eventsWin?.rows?.length) {
+    const part = (w) => src.eventsWin.rows.filter((r) => r.window === w);
+    const one = (w) => { const rows = part(w); if (!rows.length) return null; const a = analyseEvents(rows, { khojSellerId: s.khojSellerId, weights, idx, khojToSellerProduct, sellerProductCat, historyRows: src.history?.rows || [] }); return a ? { from: day(rows[0].window_start), to: day(rows[0].window_end), metrics: a.metrics, matched: a.matched ? { metrics: a.matched.metrics, products: a.matched.products } : null, beyond: a.beyond, khojSessions: a.khojSessions } : null; };
+    sessionsWin = { change: day(s.recoChangeDay), before: one('before'), after: one('after') };
+  }
   // ---------- Overall Status and Scaling Plan ----------
   const productQuality = src.prodQuality?.rows?.length ? analyseProductQuality(src.prodQuality.rows) : null;
   const overview = src.daywise?.rows?.length ? computeOverview({ daywiseRows: src.daywise.rows, pnlRows: [...(src.pnl?.rows || []), ...(src.pnlWeeks?.rows || [])], historyRows: src.history?.rows || [], orderRows: src.khojOrders?.rows || [], khojSellerId: s.khojSellerId, sessionMinutes: s.sessionMinutes, rtoWindow: { from: day(s.predRtoFrom), to: day(s.predRtoTo) }, onlineRtoOverride: productQuality?.onlineRto?.seller ?? null, today }) : null;
@@ -879,7 +886,7 @@ export function compute(src, s, history, today = todayIST()) {
   const repeatBench = src.benchmark?.rows?.length ? analyseRepeatBenchmark(src.benchmark.rows, { khojSellerId: s.khojSellerId, weights }) : null;
 
   return {
-    today, catAov, notes, kpis, killReview, overlap, customers, sessions, repeatBench, visitorPersonalisation, productQuality, likability, revisit, sellerSgmv, overview, scaling,
+    today, catAov, notes, kpis, killReview, overlap, customers, sessions, repeatBench, sessionsWin, visitorPersonalisation, productQuality, likability, revisit, sellerSgmv, overview, scaling,
     universe: hasUniverse ? { byCat: universe, hasAll: true, hasStatus: uHasStatus, origin: src.universe.origin } : null,
     activeTrialKeys: trials.filter((t) => t.active).map((t) => t.id),
     coverage: coverageRows,
