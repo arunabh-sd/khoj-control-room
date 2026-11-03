@@ -45,8 +45,8 @@ export const DEFAULT_SETTINGS = {
   // Cross-selling: the day the recommendation logic changed (left out of both windows) and how many days to compare before it.
   recoChangeDay: '2026-10-30',
   recoCompareDays: 14,
-  predRtoFrom: '2026-10-06',
-  predRtoTo: '2026-10-13',
+  predRtoFrom: '2026-10-17',
+  predRtoTo: '2026-10-23',
 
   // PMF benchmarks (base sellers) and scalability modelling. 0 = not set / derive from data.
   baseSpendNmv: 35,             // base sellers' Spend/NMV % (ShopDeck seller baseline)
@@ -120,6 +120,8 @@ export function mergeSettings(overrides) {
   }
   // Product signal eligibility moved from ₹1,500 to ₹1,000 (Oct 23): a saved old default shouldn't pin it.
   if (overrides && Number(overrides.catalogMinSpend) === 1500) { overrides = { ...overrides }; delete overrides.catalogMinSpend; }
+  // Predicted-RTO base moved from 6–13 Oct to 17–23 Oct (Nov 3): a saved old default shouldn't pin it.
+  if (overrides && overrides.predRtoFrom === '2026-10-06' && overrides.predRtoTo === '2026-10-13') { overrides = { ...overrides }; delete overrides.predRtoFrom; delete overrides.predRtoTo; }
   for (const [k, v] of Object.entries(overrides || {})) {
     if (!(k in DEFAULT_SETTINGS)) continue;
     const def = DEFAULT_SETTINGS[k];
