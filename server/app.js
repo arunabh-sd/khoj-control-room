@@ -464,6 +464,17 @@ export function createApi(store, { googleKeys, stateKick = defaultStateKick() } 
       const r = await pageRefresh(srcMatch[1], url.searchParams.get('force') === '1');
       return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, daily: !!r.daily, reused: !!r.reused, everyHours: EVERY_HOURS[srcMatch[1]] || null, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
+    // Size of each stored pull (rows and JSON size), loaded one at a time: for finding what makes the state heavy.
+    if (p === '/api/diag/sources' && req.method === 'GET') {
+      const out = [];
+      for (const name of SOURCE_NAMES) {
+        const s = await getSource(name);
+        const rows = s.rows || [];
+        out.push({ name, status: s.status, rows: rows.length, rawRows: s.rawRows ?? null, mb: +(JSON.stringify(rows).length / 1e6).toFixed(2), cols: Object.keys(rows[0] || {}).length, loadedAt: s.loadedAt || null });
+        delete mem[name];
+      }
+      return json(200, { sources: out, heapMb: Math.round(process.memoryUsage().heapUsed / 1e6) });
+    }
     if (p === '/api/state' && req.method === 'GET') {
       if (!stateKick) return json(200, await buildState());
       const body = await cachedState();
