@@ -492,6 +492,7 @@ export function createApi(store, { googleKeys, stateKick = defaultStateKick() } 
     }
     // Size of each stored pull (rows and JSON size), loaded one at a time: for finding what makes the state heavy.
     if (p === '/api/diag/sources' && req.method === 'GET') {
+      if (who.user && !who.user.admin) return json(403, { error: 'Only admins' });
       const out = [];
       for (const name of SOURCE_NAMES) {
         const s = await getSource(name);
