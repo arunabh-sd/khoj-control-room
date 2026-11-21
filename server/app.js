@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadOne, SOURCE_NAMES, SOURCE_LABELS, DAILY_SOURCES, EVERY_HOURS, PHASE } from './sources.js';
-import { khojOrderWeights, parentSellerList, analyseProductQuality } from './benchmarks.js';
+import { khojOrderWeights, parentSellerList, analyseProductQuality, compactEvents } from './benchmarks.js';
+import { categoryOf } from './categories.js';
 import { buildProductIndex } from './engine.js';
 import { compute, todayIST, day } from './engine.js';
 import { addDaysIST, mondayOf, parseDaywise, aggDays, predictRto, rtoForMix } from './overview.js';
@@ -163,11 +164,25 @@ export function createApi(store, { googleKeys, stateKick = defaultStateKick() } 
         return { ...kept, status: 'error' };
       }
     }
+    if ((name === 'events' || name === 'eventsWin') && result.status === 'ok' && result.rows.length) result.rows = await compactEventRows(result.rows);
     mem[name] = result;
     await setKV('source:' + name, result);
     await setKV('meta:' + name, { loadedAt: result.loadedAt, status: result.status });
     await stateChanged();
     return result;
+  }
+
+  // Product maps for compacting the site-sessions rows (products, universe, order history as they are stored now).
+  async function compactEventRows(rows) {
+    const settings = mergeSettings(await store.getSettings());
+    const [products, universe, history] = [await getSource('products'), await getSource('universe'), await getSource('history')];
+    const idx = buildProductIndex(products.rows || [], settings);
+    const khojToSellerProduct = new Map(), sellerProductCat = new Map();
+    for (const r of universe.rows || []) {
+      if (r.khoj_product_id && r.seller_product_id) khojToSellerProduct.set(String(r.khoj_product_id), String(r.seller_product_id));
+      if (r.seller_product_id && r.category_l4) sellerProductCat.set(String(r.seller_product_id), { l4: r.category_l4, cat: categoryOf(r) });
+    }
+    return compactEvents(rows, { khojSellerId: settings.khojSellerId, idx, khojToSellerProduct, sellerProductCat, historyRows: history.rows || [] });
   }
 
   // ----- cached state -----
@@ -183,6 +198,17 @@ export function createApi(store, { googleKeys, stateKick = defaultStateKick() } 
     if (running?.at && Date.now() - running.at < 10 * 60_000) { await setKV('state:pending', true); return { skipped: 'already computing' }; }
     let runs = 0;
     try {
+      // Site-sessions pulls stored before compaction existed are too big to hold together with everything else:
+      // compact them one at a time and store them back.
+      await setKV('state:running', { at: Date.now() });
+      for (const name of ['events', 'eventsWin']) {
+        const src = await getKV('source:' + name);
+        if (src?.status === 'ok' && (src.rows?.length || 0) > 60_000) {
+          const rows = await compactEventRows(src.rows);
+          await setKV('source:' + name, { ...src, rows, compactedFrom: src.rows.length });
+        }
+        delete mem[name];
+      }
       while (runs < 4) {
         runs++;
         await setKV('state:running', { at: Date.now() });

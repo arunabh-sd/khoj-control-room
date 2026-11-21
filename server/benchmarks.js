@@ -49,6 +49,60 @@ function weighted(rows, weights, rateOf, baseOf, minBase) {
 
 const n = (v) => num(v) || 0;
 
+// Category of a landing product: Khoj's own catalogue for Khoj, else the seller product's mapped Khoj product, the
+// universe's category, or the category of what Khoj buyers bought.
+export function eventsCatResolver({ khojSellerId: K, idx, khojToSellerProduct = new Map(), sellerProductCat = new Map(), historyRows = [] }) {
+  const sellerToKhoj = new Map([...khojToSellerProduct.entries()].map(([k, sp]) => [sp, k]));
+  const histCat = new Map();
+  for (const x of historyRows) {
+    if (!x.p || histCat.has(x.p) || x.s === K) continue;
+    const c = x.l4 ? categoryOfL4(x) : categoryFromName(x.n);
+    if (c) histCat.set(x.p, c);
+  }
+  const prodById = (id) => idx.byId.get(String(id)) || idx.bySku.get(String(id)) || idx.byCode.get(String(id)) || null;
+  const catOf = (sellerId, id) => {
+    if (!id) return null;
+    if (sellerId === K) return prodById(id)?.cat || null;
+    const kid = sellerToKhoj.get(String(id));
+    if (kid && idx.byId.get(kid)) return idx.byId.get(kid).cat;
+    return sellerProductCat.get(String(id))?.cat || histCat.get(String(id)) || null;
+  };
+  return { prodById, catOf };
+}
+
+// The site-sessions question returns a row per seller × landing product for every parent seller's whole catalogue
+// (hundreds of thousands of rows). Only the products Khoj sells are compared one to one; the rest are only needed by
+// category and visitor type. Collapse those, drop per-product source rows for them, and drop empty columns.
+const LANDING_SUMS = ['sessions', 'ppo', 'products_viewed', 'multi_product_sessions', 'secs', 'buy_now_sessions', 'multi_buy_now_sessions', 'checkout_sessions'];
+export function compactEvents(rows, ctx) {
+  const K = ctx.khojSellerId;
+  const { prodById, catOf } = eventsCatResolver(ctx);
+  const keep = new Set();
+  for (const r of rows) {
+    if (String(r.kind) !== 'landing' || String(r.seller_id) !== K) continue;
+    const p = prodById(r.landing_product); if (!p) continue;
+    keep.add(String(p.id));
+    const sp = ctx.khojToSellerProduct?.get(String(p.id)); if (sp) keep.add(sp);
+  }
+  const clean = (r) => { const o = {}; for (const [k, v] of Object.entries(r)) if (v !== null && v !== undefined && v !== '') o[k] = v; return o; };
+  const out = [], agg = new Map();
+  for (const r of rows) {
+    const kind = String(r.kind || 'seller'), sid = String(r.seller_id);
+    if (sid === K || (kind !== 'landing' && kind !== 'landing_src') || keep.has(String(r.landing_product))) { out.push(clean(r)); continue; }
+    if (kind === 'landing_src') continue;
+    const cat = catOf(sid, r.landing_product) || null;
+    const key = [r.window || '', sid, r.visitor_type || '', cat || ''].join('|');
+    let a = agg.get(key);
+    if (!a) {
+      a = clean({ kind, seller_id: sid, visitor_type: r.visitor_type, window: r.window, window_start: r.window_start, window_end: r.window_end, landing_product: '~' + (cat || 'other') });
+      a.cat_hint = cat; for (const f of LANDING_SUMS) a[f] = 0;
+      agg.set(key, a);
+    }
+    for (const f of LANDING_SUMS) a[f] += Number(r[f]) || 0;
+  }
+  return out.concat([...agg.values()]);
+}
+
 export function analyseEvents(rows, { khojSellerId, weights, idx, khojToSellerProduct = new Map(), sellerProductCat = new Map(), historyRows = [] }) {
   if (!rows?.length) return null;
   const K = khojSellerId;
@@ -85,22 +139,8 @@ export function analyseEvents(rows, { khojSellerId, weights, idx, khojToSellerPr
   // ---------- RCA, level 2: why sessions explore less ----------
   // Product → category for any landing product: Khoj products directly; seller products through Khoj, the
   // universe question or the order history (category column or product name).
-  const sellerToKhoj = new Map([...khojToSellerProduct.entries()].map(([k, sp]) => [sp, k]));
-  const histCat = new Map();
-  for (const x of historyRows) {
-    if (!x.p || histCat.has(x.p) || x.s === K) continue;
-    const c = x.l4 ? categoryOfL4(x) : categoryFromName(x.n);
-    if (c) histCat.set(x.p, c);
-  }
-  const prodById = (id) => idx.byId.get(String(id)) || idx.bySku.get(String(id)) || idx.byCode.get(String(id)) || null;
-  const catOf = (sellerId, id) => {
-    if (!id) return null;
-    if (sellerId === K) return prodById(id)?.cat || null;
-    const kid = sellerToKhoj.get(String(id));
-    if (kid && idx.byId.get(kid)) return idx.byId.get(kid).cat;
-    return sellerProductCat.get(String(id))?.cat || histCat.get(String(id)) || null;
-  };
-  const landing = rows.filter((r) => kindOf(r) === 'landing').map((r) => ({ ...r, seller_id: String(r.seller_id), cat: catOf(String(r.seller_id), r.landing_product) }));
+  const { prodById, catOf } = eventsCatResolver({ khojSellerId: K, idx, khojToSellerProduct, sellerProductCat, historyRows });
+  const landing = rows.filter((r) => kindOf(r) === 'landing').map((r) => ({ ...r, seller_id: String(r.seller_id), cat: r.cat_hint !== undefined ? r.cat_hint : catOf(String(r.seller_id), r.landing_product) }));
 
   // Segment table per seller: { seg → {sessions, products, multi, bn} }
   const segOf = (list, keyOf) => {

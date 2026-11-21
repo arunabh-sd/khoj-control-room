@@ -449,3 +449,33 @@ test('cached state: computed in the background, served from the cache, recompute
     for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
 });
+
+test('compacting site-sessions rows keeps the matched, visitor and category comparisons identical', async () => {
+  const { analyseEvents, compactEvents } = await import('../server/benchmarks.js');
+  const K = 'K';
+  const prods = new Map([['k1', { id: 'k1', seller: 'A', cat: 'Saree', title: 'K1' }], ['k2', { id: 'k2', seller: 'B', cat: 'Jewellery', title: 'K2' }]]);
+  const idx = { byId: prods, bySku: new Map(), byCode: new Map() };
+  const khojToSellerProduct = new Map([['k1', 'a1'], ['k2', 'b1']]);
+  const sellerProductCat = new Map([['a1', { cat: 'Saree' }], ['a2', { cat: 'Saree' }], ['a3', { cat: 'Jewellery' }], ['b1', { cat: 'Jewellery' }], ['b2', { cat: 'Saree' }]]);
+  const L = (seller, prod, vt, s, extra = {}) => ({ kind: 'landing', seller_id: seller, landing_product: prod, visitor_type: vt, sessions: s, ppo: s * 2, products_viewed: s * 1.5, multi_product_sessions: Math.round(s / 3), secs: s * 40, buy_now_sessions: Math.round(s / 10), multi_buy_now_sessions: 1, checkout_sessions: Math.round(s / 20), other_product: null, bucket: null, ...extra });
+  const rows = [
+    { kind: 'seller', seller_id: K, sessions: 300, ppo: 600, products_viewed: 450, multi_product_sessions: 100, secs: 12000, buy_now_sessions: 30, multi_buy_now_sessions: 3, checkout_sessions: 15, orders: 8 },
+    { kind: 'seller', seller_id: 'A', sessions: 3000, ppo: 6000, products_viewed: 5000, multi_product_sessions: 1100, secs: 120000, buy_now_sessions: 300, multi_buy_now_sessions: 30, checkout_sessions: 150, orders: 80 },
+    { kind: 'seller', seller_id: 'B', sessions: 2000, ppo: 4000, products_viewed: 3000, multi_product_sessions: 700, secs: 80000, buy_now_sessions: 200, multi_buy_now_sessions: 20, checkout_sessions: 100, orders: 50 },
+    L(K, 'k1', 'new', 150), L(K, 'k1', 'returning', 50), L(K, 'k2', 'new', 100),
+    L('A', 'a1', 'new', 400), L('A', 'a1', 'returning', 200), L('A', 'a2', 'new', 900), L('A', 'a2', 'returning', 300), L('A', 'a3', 'new', 700), L('A', 'zz', 'new', 500),
+    L('B', 'b1', 'new', 600), L('B', 'b2', 'new', 800), L('B', 'b2', 'returning', 600),
+    { kind: 'landing_src', seller_id: 'A', landing_product: 'a2', bucket: 'Meta', sessions: 500 }, { kind: 'landing_src', seller_id: 'A', landing_product: 'a1', bucket: 'Meta', sessions: 300 }
+  ];
+  const ctx = { khojSellerId: K, idx, khojToSellerProduct, sellerProductCat, historyRows: [] };
+  const weights = new Map([['A', 2], ['B', 1]]);
+  const before = analyseEvents(rows, { ...ctx, weights });
+  const small = compactEvents(rows, ctx);
+  assert.ok(small.length < rows.length);
+  assert.ok(!small.some((r) => r.kind === 'landing_src' && r.landing_product === 'a2'));
+  const after = analyseEvents(small, { ...ctx, weights });
+  assert.deepEqual(after.matched, before.matched);
+  assert.deepEqual(after.metrics, before.metrics);
+  assert.deepEqual(after.rca?.visitors, before.rca?.visitors);
+  assert.deepEqual(after.rca?.categories, before.rca?.categories);
+});
