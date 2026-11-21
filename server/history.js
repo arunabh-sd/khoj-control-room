@@ -362,7 +362,8 @@ export function analyseHistory(rows, ctx) {
   const byRecency = groupBy(custs, recencyOf, RECENCY);
 
   // ----- journeys: category by month before Khoj, then the Khoj category -----
-  const MONTH = (t) => new Date((t + 330) * 60000).toLocaleString('en-IN', { month: 'short', timeZone: 'UTC' });
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const MONTH = (t) => MONTHS[new Date((t + 330) * 60000).getUTCMonth()];
   const monthKey = (t) => new Date((t + 330) * 60000).toISOString().slice(0, 7);
   const journeyOf = (cu, max = 3) => {
     const months = new Map();

@@ -24,7 +24,8 @@ const SOURCES = {
   bumper: { env: 'MB_Q_BUMPER', id: '16830', file: 'bumper.csv', label: 'Bumper coupon use: Khoj vs parent', everyHours: 24 },
   products: { env: 'MB_Q_PRODUCTS', file: 'products.csv', label: 'Products', everyHours: 6 },
   ads: { env: 'MB_Q_ADS', file: 'ads.csv', label: 'Trial and scale ads' },
-  catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)' },
+  // Grows with every product × day since launch, too slow for a page load: pulled in the background every 3 hours.
+  catalog: { env: 'MB_Q_PRODUCT_SPEND', alt: 'MB_Q_CATALOG', file: 'catalog.csv', label: 'Product-wise spend (all campaigns)', everyHours: 3 },
   adsetMap: { env: 'MB_Q_ADSET_MAP', file: 'adset_map.csv', label: 'Ad set → product map' },
   overlap: { env: 'MB_Q_OVERLAP', file: 'overlap.csv', label: 'Khoj × parent seller buyer overlap', everyHours: 24 },
   history: { env: 'MB_Q_CUSTOMER_HISTORY', file: 'history.csv', label: 'Khoj buyers\' ShopDeck order history (12 months)', compact: compactHistory, everyHours: 24 },

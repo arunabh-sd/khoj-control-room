@@ -422,3 +422,30 @@ test('visitor personalisation: unrelated sessions take the matched conversion fo
   assert.ok(Math.abs(V.estimate.conservative.extraOrders - 6) < 1e-9);   // 200 × (4% − 1%)
   assert.ok(Math.abs(V.estimate.conservative.newConversionPct - 1.7) < 1e-9);
 });
+
+test('cached state: computed in the background, served from the cache, recomputed after a rule change', async () => {
+  const saved = { DATA_DIR: process.env.DATA_DIR, NO_BUNDLED_FALLBACK: process.env.NO_BUNDLED_FALLBACK };
+  delete process.env.DATA_DIR; process.env.NO_BUNDLED_FALLBACK = '1';
+  try {
+    const { createStore } = await import('../server/store.js');
+    const { createApi } = await import('../server/app.js');
+    const store = createStore(); await store.init();
+    let kicks = 0, pending = null;
+    const api = createApi(store, { stateKick: async () => { kicks++; pending = api.computeAndCacheState(); return true; } });
+    const get = () => api.handle(new Request('http://x/api/state'));
+    assert.equal((await get()).status, 202);                       // nothing cached yet: background starts
+    await pending;
+    const first = await (await get()).json();
+    assert.equal(first.meta.updating, false);
+    assert.ok(first.meta.computedAt);
+    const k = kicks;
+    await api.handle(new Request('http://x/api/settings', { method: 'PUT', body: JSON.stringify({ winBar: 29 }) }));
+    assert.equal(kicks, k + 1);                                    // a rule change asks for a recompute
+    await pending;
+    const again = await (await get()).json();
+    assert.equal(again.meta.updating, false);
+    assert.equal(again.settings.winBar, 29);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
+});

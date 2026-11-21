@@ -82,6 +82,31 @@ function renderLoader() {
   $('refresh').textContent = now ? `${now.short}…` : 'Loading…';
 }
 
+// A failed request's reason: the API's JSON error, or the HTTP status (Netlify's timeout pages aren't JSON).
+async function httpError(res) {
+  const txt = await res.text().catch(() => '');
+  try { const j = JSON.parse(txt); if (j.error) return j.error; } catch { /* not JSON */ }
+  if (res.status === 504 || res.status === 502) return `the server took too long (HTTP ${res.status})`;
+  return `HTTP ${res.status}${res.statusText ? ' ' + res.statusText : ''}`;
+}
+// The state is recomputed in the background after pulls and rule changes: check back until the new one is ready.
+let pollTimer = null;
+function pollState(tries = 0) {
+  clearTimeout(pollTimer);
+  if (tries > 60) { ui.computing = false; render(); return; }
+  pollTimer = setTimeout(async () => {
+    try {
+      const res = await apiFetch('/api/state');
+      if (res.status === 200) {
+        const body = await res.json();
+        ui.data = body; ui.computing = !!body.meta?.updating; render();
+        if (!ui.computing) return;
+      }
+    } catch { /* keep trying */ }
+    pollState(tries + 1);
+  }, 6000);
+}
+
 async function load(pull = true, force = false) {
   if (ui.busy) return;
   ui.busy = true; ui.msg = ''; ui.custRows = null; renderChrome();
@@ -117,8 +142,13 @@ async function load(pull = true, force = false) {
     }
     setStep(progress.steps.length - 1);
     const res = await apiFetch('/api/state');
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
-    ui.data = await res.json();
+    if (res.status === 202) { ui.computing = true; pollState(); }
+    else {
+      if (!res.ok) throw new Error(await httpError(res));
+      ui.data = await res.json();
+      ui.computing = !!ui.data.meta?.updating;
+      if (ui.computing) pollState();
+    }
     if (failures.length) ui.msg = `Some questions didn't load: ${failures.join(' · ')}`;
   } catch (e) {
     ui.msg = 'Could not load data: ' + e.message;
@@ -143,6 +173,7 @@ function renderChrome() {
   const notices = [];
   if (ui.msg) notices.push(`<div class="notice notice-orange">${esc(ui.msg)}</div>`);
   if (ui.note) notices.push(`<div class="notice notice-green">${esc(ui.note)}</div>`);
+  if (ui.computing) notices.push(`<div class="notice notice-amber">${d ? `Updating with the latest pulls. These numbers are from ${esc(fmtWhen(d.meta.computedAt))}; the page refreshes itself when the new ones are ready.` : 'Preparing the numbers in the background (takes a minute or two after new data). This page fills in by itself.'}</div>`);
   // Data-load issues live on the Rules tab; the engine's data notes also show on Hit % & Scalability.
   const showLoad = ui.tab === 'rules', showNotes = ui.tab === 'rules' || (ui.tab === 'pmf' && ui.sub === 'hits');
   if (d && showLoad) {
@@ -168,7 +199,7 @@ function render() {
   renderChrome();
   const d = ui.data;
   if (!d) {
-    if (!ui.busy) $('view').innerHTML = `<div class="card"><p>Nothing loaded yet.</p><p><button type="button" class="btn btn-primary" id="retry">Try again</button></p></div>`;
+    if (!ui.busy) $('view').innerHTML = ui.computing ? `<div class="card"><p class="muted">Preparing the numbers…</p></div>` : `<div class="card"><p>Nothing loaded yet.</p><p><button type="button" class="btn btn-primary" id="retry">Try again</button></p></div>`;
     return;
   }
   if (ui.tab === 'usage' && !auth.user?.admin) ui.tab = 'status';

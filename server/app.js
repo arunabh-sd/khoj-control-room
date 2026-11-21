@@ -57,7 +57,16 @@ function bundledFallback(name) {
 // the first page load pulls the page-load questions instead of reusing an older pull.
 const DATA_VERSION = '2026-10-27.2';
 
-export function createApi(store, { googleKeys } = {}) {
+// The dashboard state is computed in a background function (up to 15 minutes) and cached; page loads read the cache.
+// Locally, in tests, or when background functions aren't available, it's computed on the request as before.
+function defaultStateKick() {
+  const base = process.env.URL || process.env.DEPLOY_PRIME_URL;
+  if (!base || !process.env.METABASE_API_KEY || process.env.KHOJ_NO_BACKGROUND || process.env.DATA_DIR) return null;
+  return () => fetch(`${base}/.netlify/functions/state-background`, { method: 'POST', headers: { 'x-pull-token': pullToken() }, signal: AbortSignal.timeout(5000) })
+    .then((r) => r.status === 202).catch(() => false);
+}
+
+export function createApi(store, { googleKeys, stateKick = defaultStateKick() } = {}) {
   const mem = {};   // warm-instance copy of the last Metabase pull per source
   const auth = createAuth(store, googleKeys ? { keys: googleKeys } : {});
   let customerTable = null;
@@ -157,7 +166,50 @@ export function createApi(store, { googleKeys } = {}) {
     mem[name] = result;
     await setKV('source:' + name, result);
     await setKV('meta:' + name, { loadedAt: result.loadedAt, status: result.status });
+    await stateChanged();
     return result;
+  }
+
+  // ----- cached state -----
+  // `state:version` moves whenever something the state depends on changes (a pull, rules, the plan); the background
+  // function recomputes and stores the state with the version it saw. Ticked tasks are overlaid on read instead.
+  async function stateChanged() {
+    if (!stateKick) return;
+    await setKV('state:version', Date.now());
+    await stateKick();
+  }
+  async function computeAndCacheState() {
+    const running = await getKV('state:running');
+    if (running?.at && Date.now() - running.at < 10 * 60_000) { await setKV('state:pending', true); return { skipped: 'already computing' }; }
+    let runs = 0;
+    try {
+      while (runs < 4) {
+        runs++;
+        await setKV('state:running', { at: Date.now() });
+        await setKV('state:pending', false);
+        const version = (await getKV('state:version')) ?? 0;
+        const t0 = Date.now();
+        const body = await buildState();
+        await setKV('state:customers', customerTable);
+        await setKV('state:cache', { version, at: new Date().toISOString(), ms: Date.now() - t0, body });
+        if (((await getKV('state:version')) ?? 0) === version && !(await getKV('state:pending'))) break;
+      }
+    } finally { await setKV('state:running', null); }
+    return { runs };
+  }
+  async function cachedState() {
+    const [cache, version] = await Promise.all([getKV('state:cache'), getKV('state:version')]);
+    if (!cache) { if (await stateKick()) return null; return buildState(); }   // no background functions: compute here
+    const fresh = version === null || version === undefined || cache.version === version;
+    if (!fresh) {
+      const running = await getKV('state:running');
+      if (!(running?.at && Date.now() - running.at < 10 * 60_000)) await stateKick();
+    }
+    const body = cache.body;
+    const tasks = new Map((await store.listTasks()).map((x) => [x.id, x]));
+    body.tasks = (body.tasks || []).map((x) => tasks.get(x.id) || x);
+    body.meta = { ...body.meta, computedAt: cache.at, computeMs: cache.ms, updating: !fresh };
+    return body;
   }
 
   // Never calls Metabase: uses the last pull. Daily sources are re-read from the store when the scheduled pull has
@@ -392,6 +444,7 @@ export function createApi(store, { googleKeys } = {}) {
       await setKV('meta:' + repull[1], { loadedAt: null, status: 'repull' });
       await setKV('tries:' + repull[1], { period: null, n: 0 });
       await track(who.user?.email, 'repull', { detail: repull[1] });
+      await stateChanged();
       return json(200, { ok: true });
     }
     // The rows the dashboard is using for a source, as CSV (for checking the numbers or deeper analysis offline).
@@ -411,8 +464,13 @@ export function createApi(store, { googleKeys } = {}) {
       const r = await pageRefresh(srcMatch[1], url.searchParams.get('force') === '1');
       return json(200, { name: srcMatch[1], status: r.status, stale: !!r.stale, daily: !!r.daily, reused: !!r.reused, everyHours: EVERY_HOURS[srcMatch[1]] || null, origin: r.origin, rows: r.rawRows ?? r.rows.length, columns: Object.keys(r.rows[0] || {}), error: r.error || null, loadedAt: r.loadedAt });
     }
-    if (p === '/api/state' && req.method === 'GET') return json(200, await buildState());
+    if (p === '/api/state' && req.method === 'GET') {
+      if (!stateKick) return json(200, await buildState());
+      const body = await cachedState();
+      return body ? json(200, body) : json(202, { computing: true });
+    }
     if (p === '/api/customers' && req.method === 'GET') {
+      if (stateKick) return json(200, (await getKV('state:customers')) || { rows: [] });
       if (!customerTable) await buildState();
       return json(200, customerTable || { rows: [] });
     }
@@ -429,11 +487,13 @@ export function createApi(store, { googleKeys } = {}) {
       const plan = normalisePlan({ ...body, saved: true });
       if (store.setKV) await store.setKV('plan', plan);
       await track(who.user?.email, 'plan', { detail: 'saved' });
+      await stateChanged();
       return json(200, { ok: true, plan });
     }
     if (p === '/api/plan' && req.method === 'DELETE') {
       if (store.setKV) await store.setKV('plan', null);
       await track(who.user?.email, 'plan', { detail: 'reset to defaults' });
+      await stateChanged();
       return json(200, { ok: true });
     }
     if (p === '/api/settings' && req.method === 'PUT') {
@@ -444,12 +504,14 @@ export function createApi(store, { googleKeys } = {}) {
       for (const k of Object.keys(incoming)) if (k in DEFAULT_SETTINGS) toSave[k] = merged[k];
       await store.saveSettings(toSave);
       const changed = Object.keys(toSave).filter((k) => JSON.stringify(toSave[k]) !== JSON.stringify(before[k]));
+      await stateChanged();
       await track(who.user?.email, 'rules', { detail: changed.length ? 'changed: ' + changed.map((k) => SETTING_LABELS[k]?.[1] || k).join(', ') : 'saved, no change' });
       return json(200, { ok: true, settings: mergeSettings(await store.getSettings()) });
     }
     if (p === '/api/settings' && req.method === 'DELETE') {
       await store.saveSettings({ ...DEFAULT_SETTINGS });
       await track(who.user?.email, 'rules', { detail: 'reset to defaults' });
+      await stateChanged();
       return json(200, { ok: true, settings: DEFAULT_SETTINGS });
     }
     return json(404, { error: 'Not found' });
@@ -461,6 +523,7 @@ export function createApi(store, { googleKeys } = {}) {
     },
     refreshSource,
     runDaily,
+    computeAndCacheState,
     // Runs inside the background function: one source, with a long Metabase timeout.
     async pullInBackground(name) {
       if (!DAILY_SOURCES.includes(name)) return { name, error: 'not a scheduled source' };
